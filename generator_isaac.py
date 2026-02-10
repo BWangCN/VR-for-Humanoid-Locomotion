@@ -67,11 +67,30 @@ def apply_rigid_body(prim_path: str):
     if not mass_api.GetMassAttr().HasAuthoredValueOpinion():
         mass_api.CreateMassAttr(10.0)
 
+def make_cone_marker(prim_path: str, pos, radius: float, height: float, color_rgba):
+    """Create a colored cone primitive as a visual marker (no physics)."""
+    cone = UsdGeom.Cone.Define(stage, prim_path)
+    cone.CreateRadiusAttr(radius)
+    cone.CreateHeightAttr(height)
+    cone.CreateAxisAttr("Z")
+
+    # Position: cone center is at half-height, so shift up so base sits on floor
+    xform = UsdGeom.Xformable(cone.GetPrim())
+    xform.ClearXformOpOrder()
+    xform.AddTranslateOp().Set(Gf.Vec3d(pos[0], pos[1], pos[2] + height / 2.0))
+
+    # Display color
+    cone.CreateDisplayColorAttr([Gf.Vec3f(color_rgba[0], color_rgba[1], color_rgba[2])])
+    if len(color_rgba) > 3:
+        cone.CreateDisplayOpacityAttr([color_rgba[3]])
+
+    return cone.GetPrim()
+
 def build_room(room_spec):
     origin = room_spec.get("origin_m", [0.0, 0.0, 0.0])
     w, l, h = room_spec["size_m"]
     wall_t = room_spec.get("wall_thickness_m", 0.1)
-    floor_t = room_spec.get("floor_thickness_m", 0.05)
+    floor_t = room_spec.get("floor_thickness_m", 0.001)
 
     # Create root
     ensure_xform("/World")
@@ -122,24 +141,34 @@ def build_scene_from_json(json_path: str):
     # Build room
     build_room(spec["room"])
 
+    # Ensure marker parent exists
+    ensure_xform("/World/Markers")
+
     # Place objects
     for obj in spec["objects"]:
-        usd_path = obj["usd_path"]
         prim_path = obj["prim_path"]
         pos = obj["pose_m"]["pos"]
         rot = obj["pose_m"]["rot_deg"]
 
-        # Isaac likes forward slashes; Windows path in USD ref usually works with forward slashes.
-        usd_path_fixed = usd_path.replace("\\", "/")
+        if obj.get("class") == "marker":
+            # Create cone primitive instead of loading a USD reference
+            radius = obj.get("marker_radius_m", 0.08)
+            height = obj.get("marker_height_m", 0.40)
+            color = obj.get("marker_color_rgba", [1.0, 1.0, 1.0, 1.0])
+            make_cone_marker(prim_path, pos, radius, height, color)
+        else:
+            usd_path = obj["usd_path"]
+            # Isaac likes forward slashes; Windows path in USD ref usually works with forward slashes.
+            usd_path_fixed = usd_path.replace("\\", "/")
 
-        add_reference(prim_path, usd_path_fixed)
-        set_xform_xyz_rpy_deg(prim_path, pos, rot)
+            add_reference(prim_path, usd_path_fixed)
+            set_xform_xyz_rpy_deg(prim_path, pos, rot)
 
-        if obj.get("rigid_body", False):
-            apply_rigid_body(prim_path)
+            if obj.get("rigid_body", False):
+                apply_rigid_body(prim_path)
 
 # ---- Run ----
 # Put your json path here:
-JSON_PATH = r"C:\Users\Wayne\Desktop\GMU\PhD\Humanoid\SimEnv\bedroom\layout_json\bedroom05.json"
+JSON_PATH = r"C:\Users\Wayne\Desktop\GMU\PhD\Humanoid\SimEnv\bedroom\layout_json\bedroom_d0_008_simplified.json"
 build_scene_from_json(JSON_PATH)
 print("Scene built from JSON:", JSON_PATH)

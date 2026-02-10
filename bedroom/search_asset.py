@@ -4,12 +4,12 @@ import pandas as pd
 import objaverse
 
 # ——— Config ———
-OUT_DIR = "./objaverse_bedroom_v1"
+OUT_DIR = "./objaverse_bedroom"
 DOWNLOAD_DIR = os.path.join(OUT_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # 每类最多选多少个
-PER_CLASS = 20
+PER_CLASS = 50
 # 并行下载使用几进程
 DOWNLOAD_PROCESSES = 4
 

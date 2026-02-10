@@ -5,11 +5,11 @@ from collections import defaultdict
 
 # -------- Paths --------
 BASE_DIR = r"C:\Users\Wayne\Desktop\GMU\PhD\Humanoid\SimEnv\bedroom"
-CANDIDATES_CSV = os.path.join(BASE_DIR, "objaverse_bedroom_v1", "bedroom_candidates.csv")
-PATHS_CSV = os.path.join(BASE_DIR, "objaverse_bedroom_v1", "bedroom_downloaded_paths.csv")
+CANDIDATES_CSV = os.path.join(BASE_DIR, "objaverse_bedroom", "bedroom_candidates.csv")
+PATHS_CSV = os.path.join(BASE_DIR, "objaverse_bedroom", "bedroom_downloaded_paths.csv")
 
 # 输出目录（当前工程下）
-OUTPUT_DIR = os.path.join(BASE_DIR, "assets_raw")
+OUTPUT_DIR = os.path.join(BASE_DIR, "bedroom_assets_raw")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 

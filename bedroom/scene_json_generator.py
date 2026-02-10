@@ -1,20 +1,15 @@
 # scene_json_generator.py
-# Generate a crowded bedroom scene JSON using asset_registry.csv (AABB + dst_usd).
+# Difficulty (0..3) is locomotion-action-driven:
+# 0: FRONT pass + NO step-over on corridor
+# 1: FRONT pass + YES step-over on corridor
+# 2: SIDE  pass + NO step-over on corridor (front must fail)
+# 3: SIDE  pass + YES step-over on corridor (front must fail)
 #
-# Update in this version:
-# - Corridor is still reserved for BIG objects (bed/wardrobe/suitcase/desk/cabinet/chair, etc.)
-# - BUT small "step-over" clutter (blanket, shoes) is allowed to be placed inside corridor
-# - They still MUST NOT overlap with anything else
-# - Reachability check treats "step-over" clutter as NON-blocking (ignored as obstacles)
-#
-# Run:
-#   python scene_json_generator.py --registry "C:\...\asset_registry.csv" --output "C:\...\bedroom01.json"
-# Options:
-#   --seed 123
-#   --attempts 200
-#   --tier small|medium|large|random
-#   --no_reachability
-#   --require_side_only
+# Adds annealing for crowdedness: after repeated failures, reduce item counts.
+# Ensures: bed always exists; chair count >= 1 even under annealing.
+# Improves chair placement robustness with 2-stage placement:
+#   Stage A: avoid corridor_reserved (preferred)
+#   Stage B: allow corridor_reserved (fallback), reachability will filter.
 
 import argparse
 import csv
@@ -28,7 +23,7 @@ from typing import Dict, List, Optional, Tuple
 
 
 # -------------------- Defaults --------------------
-GLOBAL_SEED = 20260130
+GLOBAL_SEED = 202602081736
 
 WALL_THICKNESS = 0.10
 FLOOR_THICKNESS = 0.05
@@ -42,12 +37,30 @@ ZONE_MARGIN = 0.10
 # Humanoid standing zone (rect)
 HUMANOID_ZONE_XY = (1.0, 1.0)  # meters
 
-# Clearance model
-HUMANOID_RADIUS_MAIN = 0.35
-SIDEWAYS_MIN_WIDTH_M = 0.60
-HUMANOID_RADIUS_SIDE = SIDEWAYS_MIN_WIDTH_M / 2.0  # 0.30m
+# -------------------- Locomotion Difficulty Params --------------------
+# Per-difficulty corridor object height budget (meters).
+# max:        tallest object allowed on the corridor
+# prefer_min: forced corridor items prefer height >= this (makes step-over meaningful)
+CORRIDOR_HEIGHT_BUDGET = {
+    0: {"max": 0.0,  "prefer_min": 0.0},   # corridor clear — no objects
+    1: {"max": 0.10, "prefer_min": 0.0},    # easy step-over  (<=10 cm): thin blankets, books, closed laptops
+    2: {"max": 0.0,  "prefer_min": 0.0},    # corridor clear — no objects
+    3: {"max": 0.20, "prefer_min": 0.05},   # hard step-over  (<=20 cm): shoes, thick books, thin pillows
+}
+
+# Width requirements (meters)
+FRONT_PASS_WIDTH_M = 1.00  # 100 cm
+SIDE_PASS_WIDTH_M = 0.50   # 50 cm
+
+# For grid reachability we use "inflation radius" ~ half-width
+HUMANOID_RADIUS_MAIN = FRONT_PASS_WIDTH_M / 2.0   # 0.50
+HUMANOID_RADIUS_SIDE = SIDE_PASS_WIDTH_M / 2.0    # 0.25
 
 GRID_RES = 0.10  # reachability grid resolution (meters)
+
+# -------------------- Annealing Params --------------------
+# every FAIL_WINDOW failed attempts => one anneal level
+FAIL_WINDOW = 15
 
 # Room tiers
 ROOM_TIERS = {
@@ -57,18 +70,18 @@ ROOM_TIERS = {
 }
 ROOM_TIER_PROBS = [0.35, 0.45, 0.20]  # small/medium/large
 
-# Crowdedness
+# Crowdedness (realistic household counts)
 TIER_COUNTS = {
-    "large":  {"chairs": (0, 1), "small_items": (10, 16), "cluster_items": (5, 8)},
-    "small": {"chairs": (1, 2), "small_items": (18, 30), "cluster_items": (8, 12)},
-    "medium":  {"chairs": (2, 3), "small_items": (28, 44), "cluster_items": (10, 16)},
+    "small":  {"chairs": (0, 1), "small_items": (3, 6),  "cluster_items": (2, 4)},
+    "medium": {"chairs": (1, 2), "small_items": (5, 10), "cluster_items": (3, 6)},
+    "large":  {"chairs": (1, 2), "small_items": (8, 14), "cluster_items": (4, 8)},
 }
 
-# Corridor width: must be >0.6 and <1.2
+# Corridor width fallback/global ranges.
 CORRIDOR_WIDTH_RANGE_BY_TIER = {
-    "small":  (0.62, 0.85),
-    "medium": (0.62, 0.95),
-    "large":  (0.62, 1.10),
+    "small":  (0.52, 1.05),
+    "medium": (0.52, 1.10),
+    "large":  (0.52, 1.20),
 }
 CORRIDOR_MARGIN = 0.05  # inflate corridor "reserved" rect a bit (for big objects)
 
@@ -82,10 +95,12 @@ WALL_BIG_CLASS_PROBS = {
 }
 WALL_BIG_MAX_BY_TIER = {"small": 2, "medium": 3, "large": 4}
 
-# Step-over clutter rules:
-# - allowed to be placed inside corridor
-# - ignored in reachability obstacles (robot can step over)
-PASSABLE_ON_CORRIDOR_CLASSES = {"blanket", "shoes", "pillow"}
+# Candidate classes that may be placed on the corridor as step-over obstacles.
+STEP_OVER_CANDIDATE_CLASSES = {
+    "blanket", "shoes", "pillow",
+    "book", "laptop",
+    "sock", "socks",
+}
 
 
 # -------------------- Data Structures --------------------
@@ -101,6 +116,10 @@ class AssetAABB:
     max_y: float
     max_z: float
 
+    @property
+    def height_m(self) -> float:
+        return float(self.max_z - self.min_z)
+
 
 @dataclass
 class Placed:
@@ -112,6 +131,8 @@ class Placed:
     rot_deg: Tuple[float, float, float]
     rigid_body: bool
     rect: Tuple[float, float, float, float]  # (minx,miny,maxx,maxy) in world
+    height_m: float
+    is_step_over: bool
 
 
 # -------------------- Geometry Helpers --------------------
@@ -163,7 +184,180 @@ def place_on_floor_z(aabb: AssetAABB, spawn_extra: float = 0.0) -> float:
     return -aabb.min_z + spawn_extra
 
 
+def rect_intersects_any(rect: Tuple[float, float, float, float], rects: List[Tuple[float, float, float, float]], margin: float = 0.0) -> bool:
+    return any(rects_overlap(rect, r, margin=margin) for r in rects)
+
+
+# -------------------- Shoe-pair helper --------------------
+SHOE_PAIR_GAP = 0.04        # gap between two shoes (meters)
+SHOE_PAIR_YAW_JITTER = 8.0  # degrees of random yaw difference
+
+
+def make_shoe_pair_placed(
+    aabb: AssetAABB,
+    base_name: str,
+    base_prim: str,
+    tx: float, ty: float, z: float,
+    yaw: float,
+    rect: Tuple[float, float, float, float],
+    is_step_over: bool,
+    room_w: float, room_l: float,
+    hard_forbidden: List[Tuple[float, float, float, float]],
+    rng: random.Random,
+) -> Optional['Placed']:
+    """Place a 2nd shoe next to the 1st.  Returns a Placed or None on failure."""
+    # offset perpendicular to yaw direction by (shoe_width + gap)
+    shoe_w = aabb.max_y - aabb.min_y          # width of shoe (y axis)
+    offset_dist = shoe_w + SHOE_PAIR_GAP
+    perp_deg = yaw + 90.0
+    dx, dy = rotate_xy(offset_dist, 0.0, perp_deg)
+    tx2 = tx + dx
+    ty2 = ty + dy
+    yaw2 = yaw + rng.uniform(-SHOE_PAIR_YAW_JITTER, SHOE_PAIR_YAW_JITTER)
+
+    local_rect2 = aabb2d_after_yaw(aabb, yaw2)
+    world_rect2 = rect_translate(local_rect2, tx2, ty2)
+    if not within_room(world_rect2, room_w, room_l, WALL_MARGIN):
+        return None
+    if any(rects_overlap(world_rect2, r, margin=OBJ_MARGIN) for r in hard_forbidden):
+        return None
+
+    return Placed(
+        name=base_name + "_pair",
+        cls="shoes",
+        usd_path=aabb.dst_usd,
+        prim_path=base_prim + "_pair",
+        pos=(tx2, ty2, z),
+        rot_deg=(0.0, 0.0, yaw2),
+        rigid_body=False,
+        rect=world_rect2,
+        height_m=aabb.height_m,
+        is_step_over=is_step_over,
+    )
+
+
+def is_corridor_passable(aabb: AssetAABB, difficulty: int) -> bool:
+    """Can this asset be stepped over on the corridor at the given difficulty?"""
+    max_h = CORRIDOR_HEIGHT_BUDGET[difficulty]["max"]
+    if max_h <= 0:
+        return False
+    if aabb.cls not in STEP_OVER_CANDIDATE_CLASSES:
+        return False
+    return aabb.height_m <= max_h
+
+
+def pick_corridor_asset(
+    assets: Dict[str, Dict[str, AssetAABB]],
+    step_classes: List[str],
+    difficulty: int,
+    rng: random.Random,
+) -> Optional[AssetAABB]:
+    """Pre-filter assets by corridor height budget; prefer taller (more challenging) ones."""
+    cfg = CORRIDOR_HEIGHT_BUDGET[difficulty]
+    pool: List[AssetAABB] = []
+    preferred: List[AssetAABB] = []
+    for cls in step_classes:
+        for asset in assets.get(cls, {}).values():
+            if asset.height_m <= cfg["max"]:
+                pool.append(asset)
+                if asset.height_m >= cfg["prefer_min"]:
+                    preferred.append(asset)
+    if preferred:
+        return rng.choice(preferred)
+    if pool:
+        return rng.choice(pool)
+    return None
+
+
+# -------------------- Annealing: dynamic counts --------------------
+def compute_dynamic_counts(
+    tier: str,
+    rng: random.Random,
+    attempt_index: int,
+    difficulty: int = 0,
+    fail_window: int = FAIL_WINDOW,
+) -> Tuple[int, int, int, int, int]:
+    """
+    Returns (chair_n, small_item_n, cluster_item_n, forced_step_items_max, wall_big_max)
+
+    Annealing reduces counts in priority order (chairs reduced LAST):
+      Level 0:  no reduction
+      Level 1+: scatter items reduced first
+      Level 2+: cluster items also reduced
+      Level 3+: wall-big items reduced
+      Level 4+: forced step-over items reduced
+      Level 5+: chairs reduced (last resort)
+
+    Difficulty 0: chair minimum = 0  (simplest environment, chairs optional)
+    Difficulty 1-3: chair minimum = 1
+    Bed is always placed (handled outside this function).
+    """
+    base = TIER_COUNTS[tier]
+    anneal_level = attempt_index // fail_window  # 0,1,2,...
+
+    chair_lo, chair_hi = base["chairs"]
+    small_lo, small_hi = base["small_items"]
+    clu_lo, clu_hi = base["cluster_items"]
+
+    # baseline sample
+    chair_n = rng.randint(chair_lo, chair_hi)
+    small_item_n = rng.randint(small_lo, small_hi)
+    cluster_item_n = rng.randint(clu_lo, clu_hi)
+
+    # Chair minimum depends on difficulty
+    chair_min = 0 if difficulty == 0 else 1
+    chair_n = max(chair_min, chair_n)
+
+    # Wall-big cap from tier default
+    wall_big_base = WALL_BIG_MAX_BY_TIER.get(tier, 3)
+
+    # --- Annealing schedule (priority: scatter > cluster > wall_big > step > chairs) ---
+    # Scatter: reduce starting level 1, floor at 0
+    scatter_scale = max(0.0, 1.0 - 0.30 * anneal_level)
+    small_item_n = max(0, int(round(small_item_n * scatter_scale)))
+
+    # Cluster: reduce starting level 2, floor at 0
+    cluster_scale = max(0.0, 1.0 - 0.30 * max(0, anneal_level - 1))
+    cluster_item_n = max(0, int(round(cluster_item_n * cluster_scale)))
+
+    # Wall-big: reduce starting level 3
+    wall_big_max = max(0, wall_big_base - max(0, anneal_level - 2))
+
+    # Forced step-over: reduce starting level 4 (keep >=1 for difficulty that needs it)
+    forced_step_items_max = max(1, 3 - max(0, anneal_level - 3))
+
+    # Chairs: reduce LAST, starting level 5
+    chair_drop = max(0, anneal_level - 4)
+    chair_n = max(chair_min, chair_n - chair_drop)
+
+    return chair_n, small_item_n, cluster_item_n, forced_step_items_max, wall_big_max
+
+
 # -------------------- Registry Loading --------------------
+def _build_usd_path_map(
+    assets_orig: Dict[str, Dict[str, "AssetAABB"]],
+    assets_simp: Dict[str, Dict[str, "AssetAABB"]],
+) -> Dict[str, str]:
+    """Map original dst_usd -> simplified dst_usd for every matching asset."""
+    mapping: Dict[str, str] = {}
+    for cls, adict in assets_orig.items():
+        for name, aabb in adict.items():
+            if cls in assets_simp and name in assets_simp[cls]:
+                mapping[aabb.dst_usd] = assets_simp[cls][name].dst_usd
+    return mapping
+
+
+def _remap_scene_usd_paths(scene: Dict, usd_path_map: Dict[str, str]) -> Dict:
+    """Return a deep copy of scene with usd_path values replaced."""
+    import copy
+    s = copy.deepcopy(scene)
+    for obj in s["objects"]:
+        orig = obj.get("usd_path", "")
+        if orig and orig in usd_path_map:
+            obj["usd_path"] = usd_path_map[orig]
+    return s
+
+
 def load_registry(csv_path: str) -> Dict[str, Dict[str, AssetAABB]]:
     assets: Dict[str, Dict[str, AssetAABB]] = {}
     with open(csv_path, "r", encoding="utf-8", newline="") as f:
@@ -232,6 +426,19 @@ def sample_room_size(tier: str, rng: random.Random) -> Tuple[float, float]:
     w = rng.uniform(r["w"][0], r["w"][1])
     l = rng.uniform(r["l"][0], r["l"][1])
     return round(w, 3), round(l, 3)
+
+
+def resolve_room_size(
+    tier: str,
+    rng: random.Random,
+    fixed_w: Optional[float] = None,
+    fixed_l: Optional[float] = None,
+) -> Tuple[float, float]:
+    if (fixed_w is None) ^ (fixed_l is None):
+        raise RuntimeError("You must provide BOTH --room_w and --room_l, or neither.")
+    if fixed_w is not None and fixed_l is not None:
+        return round(float(fixed_w), 3), round(float(fixed_l), 3)
+    return sample_room_size(tier, rng)
 
 
 def sample_free_zone_rect(
@@ -345,7 +552,7 @@ def sample_free_pose_any_yaw(
     forbidden_rects: List[Tuple[float, float, float, float]],
     rng: random.Random,
     yaw_range: Tuple[float, float] = (0.0, 360.0),
-    max_tries: int = 4200,
+    max_tries: int = 9000,  # increased for robustness
 ) -> Tuple[Tuple[float, float], float, Tuple[float, float, float, float]]:
     for _ in range(max_tries):
         yaw = rng.uniform(yaw_range[0], yaw_range[1])
@@ -521,82 +728,196 @@ def pick_wall_big_classes(
     return selected[:cap]
 
 
-# -------------------- Markers (distinct) --------------------
-def pick_preferred_marker_asset(
-    assets: Dict[str, Dict[str, AssetAABB]],
-    preferred_classes: List[str],
-    rng: random.Random,
-) -> AssetAABB:
-    for cls in preferred_classes:
-        if cls in assets and assets[cls]:
-            return pick_random_from_class(assets, cls, rng)
-    for cls in ["bottle", "laptop", "book", "pillow", "box", "shoes", "blanket"]:
-        if cls in assets and assets[cls]:
-            return pick_random_from_class(assets, cls, rng)
-    raise RuntimeError("No suitable marker asset found in registry.")
+# -------------------- Markers (cone primitives) --------------------
+MARKER_RADIUS = 0.03   # meters
+MARKER_HEIGHT = 0.15   # meters
+MARKER_COLORS = {
+    "origin": [0.0, 1.0, 0.0, 1.0],   # green
+    "dest":   [1.0, 0.0, 0.0, 1.0],   # red
+}
 
 
-def place_marker_in_zone(
-    assets: Dict[str, Dict[str, AssetAABB]],
+def make_marker_placed(
     name: str,
     prim_path: str,
     zone_rect: Tuple[float, float, float, float],
-    rng: random.Random,
-    marker_kind: str,  # "origin" | "dest"
+    marker_kind: str,
 ) -> Placed:
-    if marker_kind == "origin":
-        aabb = pick_preferred_marker_asset(assets, ["bottle", "suitcase"], rng)
-        marker_color = [0.0, 1.0, 0.0, 1.0]  # green
-    else:
-        aabb = pick_preferred_marker_asset(assets, ["laptop", "book", "pillow"], rng)
-        marker_color = [1.0, 0.0, 0.0, 1.0]  # red
-
-    yaw = 0.0
-    local_rect = aabb2d_after_yaw(aabb, yaw)
-    lx0, ly0, lx1, ly1 = local_rect
-    lcx = (lx0 + lx1) * 0.5
-    lcy = (ly0 + ly1) * 0.5
-
+    """Create a cone marker at the center of a zone (no USD asset needed)."""
     zx0, zy0, zx1, zy1 = zone_rect
-    zcx = (zx0 + zx1) * 0.5
-    zcy = (zy0 + zy1) * 0.5
+    cx = (zx0 + zx1) * 0.5
+    cy = (zy0 + zy1) * 0.5
 
-    tx = zcx - lcx
-    ty = zcy - lcy
-    world_rect = rect_translate(local_rect, tx, ty)
+    r = MARKER_RADIUS
+    world_rect = (cx - r, cy - r, cx + r, cy + r)
 
-    z = place_on_floor_z(aabb, spawn_extra=0.02)
-
-    p = Placed(
+    return Placed(
         name=name,
-        cls=aabb.cls,
-        usd_path=aabb.dst_usd,
+        cls="marker",
+        usd_path="",          # no USD file — generator_isaac creates geometry
         prim_path=prim_path,
-        pos=(tx, ty, z),
-        rot_deg=(0.0, 0.0, yaw),
+        pos=(cx, cy, 0.0),    # base sits on floor
+        rot_deg=(0.0, 0.0, 0.0),
         rigid_body=False,
         rect=world_rect,
+        height_m=MARKER_HEIGHT,
+        is_step_over=True,     # never block navigation
     )
-    p._marker_color = marker_color  # type: ignore[attr-defined]
-    return p
 
 
-# -------------------- Utility: Corridor checks --------------------
-def rect_intersects_any(rect: Tuple[float, float, float, float], rects: List[Tuple[float, float, float, float]], margin: float = 0.0) -> bool:
-    return any(rects_overlap(rect, r, margin=margin) for r in rects)
+# -------------------- Corridor step-over forced placement --------------------
+def sample_pose_in_corridor(
+    room_w: float,
+    room_l: float,
+    aabb: AssetAABB,
+    hard_forbidden: List[Tuple[float, float, float, float]],
+    corridor_rects: List[Tuple[float, float, float, float]],
+    rng: random.Random,
+    max_tries: int = 7000,
+) -> Tuple[Tuple[float, float], float, Tuple[float, float, float, float]]:
+    """Place step-over item anywhere on the corridor (d1: wide corridor)."""
+    for _ in range(max_tries):
+        yaw = rng.uniform(0.0, 360.0)
+        local_rect = aabb2d_after_yaw(aabb, yaw)
+        lx0, ly0, lx1, ly1 = local_rect
+        lcx = (lx0 + lx1) * 0.5
+        lcy = (ly0 + ly1) * 0.5
+
+        cr = rng.choice(corridor_rects)
+        cx = rng.uniform(cr[0], cr[2])
+        cy = rng.uniform(cr[1], cr[3])
+
+        tx = cx - lcx
+        ty = cy - lcy
+        world_rect = rect_translate(local_rect, tx, ty)
+
+        if not within_room(world_rect, room_w, room_l, WALL_MARGIN):
+            continue
+        if not rect_intersects_any(world_rect, corridor_rects, margin=0.0):
+            continue
+        if any(rects_overlap(world_rect, r, margin=OBJ_MARGIN) for r in hard_forbidden):
+            continue
+
+        return (tx, ty), float(yaw), world_rect
+
+    raise RuntimeError(f"Failed to place step-over item in corridor: {aabb.cls}/{aabb.asset}")
+
+
+def sample_spanning_pose_in_corridor(
+    room_w: float,
+    room_l: float,
+    aabb: AssetAABB,
+    hard_forbidden: List[Tuple[float, float, float, float]],
+    corridor_rects: List[Tuple[float, float, float, float]],
+    rng: random.Random,
+    max_tries: int = 7000,
+) -> Tuple[Tuple[float, float], float, Tuple[float, float, float, float]]:
+    """Place step-over item spanning the corridor width (d3: simultaneous sidestep+step-over).
+
+    The object is oriented perpendicular to the corridor direction and centered
+    cross-wise, so the robot cannot sidestep around it.  Only the straight
+    sections of the corridor are used (avoids the L-junction overlap area).
+    """
+    for _ in range(max_tries):
+        cr = rng.choice(corridor_rects)
+        cr_xlen = cr[2] - cr[0]
+        cr_ylen = cr[3] - cr[1]
+        is_horizontal = (cr_xlen > cr_ylen)
+
+        # Pick yaw that maximises cross-corridor extent
+        best_yaw = 0.0
+        best_cross = 0.0
+        for yaw_cand in [0.0, 90.0, 180.0, 270.0]:
+            lr = aabb2d_after_yaw(aabb, yaw_cand)
+            cross = (lr[3] - lr[1]) if is_horizontal else (lr[2] - lr[0])
+            if cross > best_cross:
+                best_cross = cross
+                best_yaw = yaw_cand
+
+        yaw = best_yaw + rng.uniform(-5.0, 5.0)
+        local_rect = aabb2d_after_yaw(aabb, yaw)
+        lx0, ly0, lx1, ly1 = local_rect
+        lcx = (lx0 + lx1) * 0.5
+        lcy = (ly0 + ly1) * 0.5
+
+        cr_cx = (cr[0] + cr[2]) * 0.5
+        cr_cy = (cr[1] + cr[3]) * 0.5
+
+        if is_horizontal:
+            # Corridor runs along X → center Y, random X (avoid ends / junction)
+            along_half = (lx1 - lx0) * 0.5 + 0.15
+            x_lo = cr[0] + along_half
+            x_hi = cr[2] - along_half
+            if x_hi <= x_lo:
+                continue
+            cx = rng.uniform(x_lo, x_hi)
+            cy = cr_cy       # centred cross-wise
+        else:
+            # Corridor runs along Y → center X, random Y
+            along_half = (ly1 - ly0) * 0.5 + 0.15
+            y_lo = cr[1] + along_half
+            y_hi = cr[3] - along_half
+            if y_hi <= y_lo:
+                continue
+            cx = cr_cx       # centred cross-wise
+            cy = rng.uniform(y_lo, y_hi)
+
+        tx = cx - lcx
+        ty = cy - lcy
+        world_rect = rect_translate(local_rect, tx, ty)
+
+        if not within_room(world_rect, room_w, room_l, WALL_MARGIN):
+            continue
+        if any(rects_overlap(world_rect, r, margin=OBJ_MARGIN) for r in hard_forbidden):
+            continue
+
+        return (tx, ty), float(yaw), world_rect
+
+    raise RuntimeError(f"Failed to place spanning step-over in corridor: {aabb.cls}/{aabb.asset}")
+
+
+def pick_spanning_corridor_asset(
+    assets: Dict[str, Dict[str, AssetAABB]],
+    step_classes: List[str],
+    difficulty: int,
+    corridor_w: float,
+    rng: random.Random,
+) -> Optional[AssetAABB]:
+    """For d3: select step-over asset that best spans the corridor width.
+
+    Prefers objects whose longest horizontal dimension covers >= 60% of the
+    corridor width, so the robot cannot sidestep around it.
+    """
+    cfg = CORRIDOR_HEIGHT_BUDGET[difficulty]
+    pool: List[Tuple[AssetAABB, float]] = []
+    for cls in step_classes:
+        for asset in assets.get(cls, {}).values():
+            if asset.height_m <= cfg["max"]:
+                max_extent = max(asset.max_x - asset.min_x, asset.max_y - asset.min_y)
+                pool.append((asset, max_extent))
+    if not pool:
+        return None
+
+    # Prefer objects spanning >=60% of corridor width
+    good = [(a, e) for a, e in pool if e >= corridor_w * 0.6]
+    if good:
+        return rng.choice(good)[0]
+    # Fallback: widest available
+    pool.sort(key=lambda x: -x[1])
+    return pool[0][0]
 
 
 # -------------------- Scene Builder --------------------
-def rng_seed_hint(rng: random.Random) -> int:
-    return stable_int_hash(str(rng.random()))
-
-
 def build_one_scene(
     assets: Dict[str, Dict[str, AssetAABB]],
     rng: random.Random,
     require_reachable: bool = True,
-    require_side_only: bool = False,
     forced_tier: Optional[str] = None,
+    fixed_room_w: Optional[float] = None,
+    fixed_room_l: Optional[float] = None,
+    difficulty: Optional[int] = None,
+    attempt_index: int = 0,
+    atom: bool = False,
 ) -> Dict:
     # Tier
     if forced_tier is None or forced_tier == "random":
@@ -604,19 +925,22 @@ def build_one_scene(
     else:
         tier = forced_tier
 
-    room_w, room_l = sample_room_size(tier, rng)
+    # Difficulty
+    if difficulty is None:
+        difficulty = rng.choice([0, 1, 2, 3])
+    if difficulty not in (0, 1, 2, 3):
+        raise RuntimeError("difficulty must be 0..3")
+
+    room_w, room_l = resolve_room_size(tier, rng, fixed_room_w, fixed_room_l)
     room_h = ROOM_HEIGHT
 
-    counts = TIER_COUNTS[tier]
-    chair_n = rng.randint(counts["chairs"][0], counts["chairs"][1])
-    small_item_n = rng.randint(counts["small_items"][0], counts["small_items"][1])
-    cluster_item_n = rng.randint(counts["cluster_items"][0], counts["cluster_items"][1])
+    # Dynamic annealed counts (chairs reduced last; difficulty 0 may have 0 chairs)
+    chair_n, small_item_n, cluster_item_n, forced_step_items_max, wall_big_max = compute_dynamic_counts(
+        tier=tier, rng=rng, attempt_index=attempt_index, difficulty=difficulty, fail_window=FAIL_WINDOW
+    )
 
     placed: List[Placed] = []
 
-    # We maintain TWO forbidden sets:
-    # - hard_forbidden: must avoid for ALL objects (zones + existing objects)
-    # - corridor_reserved: avoid for BIG objects; SMALL passables may enter
     hard_forbidden: List[Tuple[float, float, float, float]] = []
     corridor_reserved: List[Tuple[float, float, float, float]] = []
 
@@ -630,9 +954,20 @@ def build_one_scene(
     dest_zone = sample_free_zone_rect(room_w, room_l, zone_w, zone_l, hard_forbidden, rng, prefer_corner=dest_corner)
     hard_forbidden.append(dest_zone)
 
-    # 2) Corridor reservation
+    # 2) Corridor width sampled by difficulty
     w_lo, w_hi = CORRIDOR_WIDTH_RANGE_BY_TIER[tier]
-    corridor_w = rng.uniform(w_lo, w_hi)
+    if difficulty in (0, 1):  # FRONT pass
+        lo = max(w_lo, FRONT_PASS_WIDTH_M + 0.02)
+        hi = w_hi
+        if hi <= lo:
+            raise RuntimeError("Tier corridor range cannot satisfy FRONT width.")
+        corridor_w = rng.uniform(lo, hi)
+    else:  # SIDE-only
+        lo = max(w_lo, SIDE_PASS_WIDTH_M + 0.02)
+        hi = min(w_hi, FRONT_PASS_WIDTH_M - 0.02)
+        if hi <= lo:
+            raise RuntimeError("Tier corridor range cannot satisfy SIDE-only width.")
+        corridor_w = rng.uniform(lo, hi)
 
     opt1, opt2 = make_L_corridor_rects(origin_zone, dest_zone, corridor_w)
     if corridor_fits_room(opt1, room_w, room_l, WALL_MARGIN):
@@ -644,22 +979,20 @@ def build_one_scene(
 
     corridor_reserved = [inflate_rect(cr, CORRIDOR_MARGIN) for cr in corridor_rects]
 
-    # Helper to decide which forbidden set to use
-    def forbidden_for_class(cls: str) -> List[Tuple[float, float, float, float]]:
-        # Everyone must avoid origin/dest zones and existing objects (hard_forbidden).
-        # BIG objects additionally must avoid corridor_reserved.
-        if cls in PASSABLE_ON_CORRIDOR_CLASSES:
-            return hard_forbidden
-        return hard_forbidden + corridor_reserved
-
-    # Helper: add object rect into hard_forbidden after placing (so nobody overlaps).
     def commit_object_rect(rect: Tuple[float, float, float, float]):
         hard_forbidden.append(rect)
 
-    # 3) Place bed (bed01-bed19) against wall (bed is BIG => must avoid corridor)
+    allow_step_on_corridor = (difficulty in (1, 3))
+    forbid_step_on_corridor = (difficulty in (0, 2))
+    # d2+d3 combo: place step-over items OUTSIDE corridor (subset inclusion of d1)
+    # atom mode skips this — atom scenes contain ONLY the single difficulty action
+    force_step_off_corridor = (difficulty in (2, 3)) and (not atom)
+
+    # 3) Place bed (always at least one bed)
     bed_candidates = [f"bed{idx:02d}" for idx in range(1, 20)]
     bed_aabb = pick_existing_asset(assets, "bed", bed_candidates, rng)
-    (tx, ty), yaw, bed_rect, _ = place_against_wall(room_w, room_l, bed_aabb, forbidden_for_class("bed"), rng, yaw_choices=BIG_YAW_CHOICES)
+    bed_forbidden = hard_forbidden + corridor_reserved
+    (tx, ty), yaw, bed_rect, _ = place_against_wall(room_w, room_l, bed_aabb, bed_forbidden, rng, yaw_choices=BIG_YAW_CHOICES)
     bed_z = place_on_floor_z(bed_aabb, spawn_extra=0.0)
     bed_name = bed_aabb.asset
     placed.append(Placed(
@@ -670,15 +1003,19 @@ def build_one_scene(
         pos=(tx, ty, bed_z),
         rot_deg=(0.0, 0.0, yaw),
         rigid_body=False,
-        rect=bed_rect
+        rect=bed_rect,
+        height_m=bed_aabb.height_m,
+        is_step_over=is_corridor_passable(bed_aabb, difficulty),
     ))
     commit_object_rect(bed_rect)
 
-    # 4) Wall-hugging big items (each chosen class at most ONE instance)
+    # 4) Wall-hugging big items (avoid corridor_reserved, capped by annealing)
     wall_big_classes = pick_wall_big_classes(tier, assets, rng)
+    wall_big_classes = wall_big_classes[:wall_big_max]
     for cls in wall_big_classes:
         big_aabb = pick_random_from_class(assets, cls, rng)
-        (tx, ty), yaw, rect, _ = place_against_wall(room_w, room_l, big_aabb, forbidden_for_class(cls), rng, yaw_choices=BIG_YAW_CHOICES)
+        forb = hard_forbidden + corridor_reserved
+        (tx, ty), yaw, rect, _ = place_against_wall(room_w, room_l, big_aabb, forb, rng, yaw_choices=BIG_YAW_CHOICES)
         z = place_on_floor_z(big_aabb, spawn_extra=0.0)
         name = f"{cls}_{big_aabb.asset}"
         placed.append(Placed(
@@ -689,34 +1026,147 @@ def build_one_scene(
             pos=(tx, ty, z),
             rot_deg=(0.0, 0.0, yaw),
             rigid_body=False,
-            rect=rect
+            rect=rect,
+            height_m=big_aabb.height_m,
+            is_step_over=is_corridor_passable(big_aabb, difficulty),
         ))
         commit_object_rect(rect)
 
-    # 5) Chairs (treated as blocking => avoid corridor)
-    if "chair" in assets and assets["chair"]:
-        for k in range(chair_n):
-            chair_aabb = pick_random_from_class(assets, "chair", rng)
-            (tx, ty), yaw, rect = sample_free_pose_any_yaw(room_w, room_l, chair_aabb, forbidden_for_class("chair"), rng, yaw_range=(0.0, 360.0))
-            z = place_on_floor_z(chair_aabb, spawn_extra=0.0)
-            name = f"chair_{k:02d}_{chair_aabb.asset}"
-            placed.append(Placed(
-                name=name,
-                cls="chair",
-                usd_path=chair_aabb.dst_usd,
-                prim_path=f"/World/Assets/{name}",
-                pos=(tx, ty, z),
-                rot_deg=(0.0, 0.0, yaw),
-                rigid_body=False,
-                rect=rect
-            ))
-            commit_object_rect(rect)
+    # 5) Chairs with 2-stage placement (chairs are reduced LAST by annealing)
+    # Stage A: avoid corridor_reserved
+    # Stage B: allow corridor_reserved (fallback), reachability later filters bad cases
+    if chair_n > 0 and ("chair" not in assets or not assets["chair"]):
+        raise RuntimeError("Chair class missing in registry but chairs are required.")
 
-    # 6) Cluster clutter near bed (some can be passable)
+    for k in range(chair_n):
+        chair_aabb = pick_random_from_class(assets, "chair", rng)
+
+        # Stage A
+        try:
+            forb_A = hard_forbidden + corridor_reserved
+            (tx, ty), yaw, rect = sample_free_pose_any_yaw(
+                room_w, room_l, chair_aabb, forb_A, rng, yaw_range=(0.0, 360.0), max_tries=12000
+            )
+        except Exception:
+            # Stage B (fallback)
+            forb_B = hard_forbidden  # allow corridor_reserved
+            (tx, ty), yaw, rect = sample_free_pose_any_yaw(
+                room_w, room_l, chair_aabb, forb_B, rng, yaw_range=(0.0, 360.0), max_tries=18000
+            )
+
+        z = place_on_floor_z(chair_aabb, spawn_extra=0.0)
+        name = f"chair_{k:02d}_{chair_aabb.asset}"
+        placed.append(Placed(
+            name=name,
+            cls="chair",
+            usd_path=chair_aabb.dst_usd,
+            prim_path=f"/World/Assets/{name}",
+            pos=(tx, ty, z),
+            rot_deg=(0.0, 0.0, yaw),
+            rigid_body=False,
+            rect=rect,
+            height_m=chair_aabb.height_m,
+            is_step_over=is_corridor_passable(chair_aabb, difficulty),
+        ))
+        commit_object_rect(rect)
+
+    # 6) Forced step-over items on corridor (d1: random on wide corridor, d3: spanning narrow corridor)
+    #
+    # Difficulty semantics (subset / cumulative):
+    #   d0 — front walk, clear corridor
+    #   d1 — front walk + step-over on wide corridor  (includes d0-type walking)
+    #   d2 — front walk + step-over in room + side pass through narrow corridor
+    #         (includes d0 + d1 challenges, step-over and sidestep are SEPARATE)
+    #   d3 — side pass + step-over SIMULTANEOUSLY on narrow corridor
+    #         (object spans corridor width so robot MUST step over while sidestepping)
+    forced_step_items = 0
+    if allow_step_on_corridor:
+        step_classes = [c for c in STEP_OVER_CANDIDATE_CLASSES if c in assets and assets[c]]
+        if step_classes:
+            forced_step_items = rng.randint(1, forced_step_items_max)
+            for kk in range(forced_step_items):
+                if difficulty == 3:
+                    # d3: pick wide object and span the narrow corridor
+                    aabb = pick_spanning_corridor_asset(assets, step_classes, difficulty, corridor_w, rng)
+                    if aabb is None:
+                        continue
+                    (tx, ty), yaw, rect = sample_spanning_pose_in_corridor(
+                        room_w, room_l, aabb, hard_forbidden, corridor_rects, rng)
+                else:
+                    # d1: random placement on wide corridor
+                    aabb = pick_corridor_asset(assets, step_classes, difficulty, rng)
+                    if aabb is None:
+                        continue
+                    (tx, ty), yaw, rect = sample_pose_in_corridor(
+                        room_w, room_l, aabb, hard_forbidden, corridor_rects, rng)
+
+                z = place_on_floor_z(aabb, spawn_extra=0.0)
+                name = f"{aabb.cls}_forcedcorr_{kk:02d}_{aabb.asset}"
+                prim = f"/World/Assets/{name}"
+                placed.append(Placed(
+                    name=name,
+                    cls=aabb.cls,
+                    usd_path=aabb.dst_usd,
+                    prim_path=prim,
+                    pos=(tx, ty, z),
+                    rot_deg=(0.0, 0.0, yaw),
+                    rigid_body=False,
+                    rect=rect,
+                    height_m=aabb.height_m,
+                    is_step_over=True,
+                ))
+                commit_object_rect(rect)
+                # Shoe pair
+                if aabb.cls == "shoes":
+                    pair = make_shoe_pair_placed(aabb, name, prim, tx, ty, z, yaw, rect, True, room_w, room_l, hard_forbidden, rng)
+                    if pair:
+                        placed.append(pair)
+                        commit_object_rect(pair.rect)
+
+    # 6b) d2/d3 combo: forced step-over OUTSIDE corridor (subset inclusion of d1)
+    #     Placed in the room (not on narrow corridor), so step-over and sidestep
+    #     are separate sequential challenges.
+    #     Skipped in atom mode (atom = single difficulty action only).
+    if force_step_off_corridor:
+        step_classes = [c for c in STEP_OVER_CANDIDATE_CLASSES if c in assets and assets[c]]
+        if step_classes:
+            n_forced_room = rng.randint(1, max(1, forced_step_items_max))
+            for kk in range(n_forced_room):
+                aabb = pick_corridor_asset(assets, step_classes, 1, rng)  # d1 height budget
+                if aabb is None:
+                    continue
+                forb = hard_forbidden + corridor_reserved  # stay off corridor
+                try:
+                    (tx, ty), yaw, rect = sample_free_pose_any_yaw(
+                        room_w, room_l, aabb, forb, rng, yaw_range=(0.0, 360.0), max_tries=5000)
+                except RuntimeError:
+                    continue
+                z = place_on_floor_z(aabb, spawn_extra=0.0)
+                name = f"{aabb.cls}_roomstep_{kk:02d}_{aabb.asset}"
+                prim = f"/World/Assets/{name}"
+                placed.append(Placed(
+                    name=name,
+                    cls=aabb.cls,
+                    usd_path=aabb.dst_usd,
+                    prim_path=prim,
+                    pos=(tx, ty, z),
+                    rot_deg=(0.0, 0.0, yaw),
+                    rigid_body=False,
+                    rect=rect,
+                    height_m=aabb.height_m,
+                    is_step_over=True,
+                ))
+                commit_object_rect(rect)
+                if aabb.cls == "shoes":
+                    pair = make_shoe_pair_placed(aabb, name, prim, tx, ty, z, yaw, rect, True, room_w, room_l, hard_forbidden, rng)
+                    if pair:
+                        placed.append(pair)
+                        commit_object_rect(pair.rect)
+
+    # 7) Cluster clutter near bed
     cluster_classes = ["shoes", "blanket", "box", "book", "bottle", "pillow", "laptop"]
     cluster_classes = [c for c in cluster_classes if c in assets and assets[c]]
 
-    # pick a cluster center near bed (just use bed center)
     bx0, by0, bx1, by1 = bed_rect
     cluster_cx = (bx0 + bx1) * 0.5
     cluster_cy = (by0 + by1) * 0.5
@@ -726,9 +1176,14 @@ def build_one_scene(
         r = radius * math.sqrt(rng.random())
         return cx + r * math.cos(t), cy + r * math.sin(t)
 
-    def place_biased_any_yaw(aabb: AssetAABB, cls: str, center: Tuple[float, float], spread: float) -> Tuple[Tuple[float, float], float, Tuple[float, float, float, float]]:
-        # biased placement: try a bunch around center, then fall back
-        for _ in range(1800):
+    def place_biased_any_yaw(aabb: AssetAABB, center: Tuple[float, float], spread: float) -> Tuple[Tuple[float, float], float, Tuple[float, float, float, float]]:
+        passable = is_corridor_passable(aabb, difficulty)
+        if passable:
+            forb = hard_forbidden + (corridor_reserved if forbid_step_on_corridor else [])
+        else:
+            forb = hard_forbidden + corridor_reserved
+
+        for _ in range(2500):
             yaw = rng.uniform(0.0, 360.0)
             local_rect = aabb2d_after_yaw(aabb, yaw)
             lx0, ly0, lx1, ly1 = local_rect
@@ -741,36 +1196,43 @@ def build_one_scene(
 
             if not within_room(world_rect, room_w, room_l, WALL_MARGIN):
                 continue
-            # overlap check: always use hard_forbidden (existing objects/zones), plus corridor if needed
-            forb = forbidden_for_class(cls)
             if any(rects_overlap(world_rect, r, margin=OBJ_MARGIN) for r in forb):
                 continue
             return (tx, ty), float(yaw), world_rect
 
-        # fallback to global free
-        return sample_free_pose_any_yaw(room_w, room_l, aabb, forbidden_for_class(cls), rng, yaw_range=(0.0, 360.0))
+        return sample_free_pose_any_yaw(room_w, room_l, aabb, forb, rng, yaw_range=(0.0, 360.0), max_tries=12000)
 
     for k in range(cluster_item_n):
         if not cluster_classes:
             break
         cls = rng.choice(cluster_classes)
         aabb = pick_random_from_class(assets, cls, rng)
-        (tx, ty), yaw, rect = place_biased_any_yaw(aabb, cls, (cluster_cx, cluster_cy), spread=1.1)
+        (tx, ty), yaw, rect = place_biased_any_yaw(aabb, (cluster_cx, cluster_cy), spread=1.1)
         z = place_on_floor_z(aabb, spawn_extra=0.0)
         name = f"{cls}_cluster_{k:02d}_{aabb.asset}"
+        prim = f"/World/Assets/{name}"
+        step_over = is_corridor_passable(aabb, difficulty)
         placed.append(Placed(
             name=name,
             cls=cls,
             usd_path=aabb.dst_usd,
-            prim_path=f"/World/Assets/{name}",
+            prim_path=prim,
             pos=(tx, ty, z),
             rot_deg=(0.0, 0.0, yaw),
             rigid_body=False,
-            rect=rect
+            rect=rect,
+            height_m=aabb.height_m,
+            is_step_over=step_over,
         ))
         commit_object_rect(rect)
+        # Shoe pair
+        if cls == "shoes":
+            pair = make_shoe_pair_placed(aabb, name, prim, tx, ty, z, yaw, rect, step_over, room_w, room_l, hard_forbidden, rng)
+            if pair:
+                placed.append(pair)
+                commit_object_rect(pair.rect)
 
-    # 7) Scattered small items (random yaw). blanket/shoes may land on corridor.
+    # 8) Scattered small items
     scatter_classes = ["shoes", "blanket", "box", "book", "bottle", "pillow", "laptop"]
     scatter_classes = [c for c in scatter_classes if c in assets and assets[c]]
 
@@ -779,12 +1241,15 @@ def build_one_scene(
             break
         cls = rng.choice(scatter_classes)
         aabb = pick_random_from_class(assets, cls, rng)
+        passable = is_corridor_passable(aabb, difficulty)
+
+        if passable:
+            forb = hard_forbidden + (corridor_reserved if forbid_step_on_corridor else [])
+        else:
+            forb = hard_forbidden + corridor_reserved
 
         (tx, ty), yaw, rect = sample_free_pose_any_yaw(
-            room_w, room_l, aabb,
-            forbidden_for_class(cls),
-            rng,
-            yaw_range=(0.0, 360.0)
+            room_w, room_l, aabb, forb, rng, yaw_range=(0.0, 360.0), max_tries=9000
         )
         z = place_on_floor_z(aabb, spawn_extra=0.0)
         name = f"{cls}_{k:02d}_{aabb.asset}"
@@ -796,39 +1261,52 @@ def build_one_scene(
             pos=(tx, ty, z),
             rot_deg=(0.0, 0.0, yaw),
             rigid_body=False,
-            rect=rect
+            rect=rect,
+            height_m=aabb.height_m,
+            is_step_over=passable,
         ))
         commit_object_rect(rect)
 
-    # 8) Markers (distinct + recorded for Unity)
-    born_marker = place_marker_in_zone(assets, "born_origin", "/World/Assets/born_origin", origin_zone, rng, marker_kind="origin")
-    # NOTE: marker should not overlap, so we enforce it using hard_forbidden only (zones+objects)
-    if any(rects_overlap(born_marker.rect, r, margin=OBJ_MARGIN) for r in hard_forbidden):
-        # if unlucky, just don't place it physically; still record zone
-        pass
-    else:
-        placed.append(born_marker)
-        commit_object_rect(born_marker.rect)
+        if cls == "shoes":
+            pair = make_shoe_pair_placed(aabb, name, f"/World/Assets/{name}", tx, ty, z, yaw, rect, passable, room_w, room_l, hard_forbidden, rng)
+            if pair:
+                placed.append(pair)
+                commit_object_rect(pair.rect)
 
-    dest_marker = place_marker_in_zone(assets, "destination", "/World/Assets/destination", dest_zone, rng, marker_kind="dest")
-    if any(rects_overlap(dest_marker.rect, r, margin=OBJ_MARGIN) for r in hard_forbidden):
-        pass
-    else:
-        placed.append(dest_marker)
-        commit_object_rect(dest_marker.rect)
+    # 9) Markers (colored cone primitives at zone centers)
+    born_marker = make_marker_placed("born_origin", "/World/Markers/origin", origin_zone, marker_kind="origin")
+    placed.append(born_marker)
 
-    # 9) Reachability check:
-    # Exclude passable-on-corridor clutter from obstacles.
+    dest_marker = make_marker_placed("destination", "/World/Markers/destination", dest_zone, marker_kind="dest")
+    placed.append(dest_marker)
+
+    # 10) Reachability check using ONLY blocking obstacles (not step-over)
     reach_mode = "unchecked"
     if require_reachable:
-        obstacle_rects = [p.rect for p in placed if p.cls not in PASSABLE_ON_CORRIDOR_CLASSES]
+        obstacle_rects = [p.rect for p in placed if (not p.is_step_over)]
         ok, reach_mode = reachability_with_side_step(room_w, room_l, obstacle_rects, origin_zone, dest_zone, grid_res=GRID_RES)
         if not ok:
             raise RuntimeError("Reachability failed (origin->destination blocked)")
-        if require_side_only and reach_mode != "side":
-            raise RuntimeError("Reachability did not require side-step (want side-only)")
 
-    # 10) Build JSON
+        # enforce difficulty reach mode
+        if difficulty in (0, 1) and reach_mode != "main":
+            raise RuntimeError("Difficulty wants FRONT pass, but main is not reachable.")
+        if difficulty in (2, 3) and reach_mode != "side":
+            raise RuntimeError("Difficulty wants SIDE-only pass, but side is not reachable.")
+
+    # 11) Corridor step-over evidence (exclude markers)
+    step_on_corridor = 0
+    for p in placed:
+        if p.is_step_over and rect_intersects_any(p.rect, corridor_rects, margin=0.0):
+            if p.name not in ("born_origin", "destination"):
+                step_on_corridor += 1
+
+    if allow_step_on_corridor and step_on_corridor <= 0:
+        raise RuntimeError("Difficulty requires step-over on corridor, but none found.")
+    if forbid_step_on_corridor and step_on_corridor > 0:
+        raise RuntimeError("Difficulty requires NO step-over on corridor, but found some.")
+
+    # 12) Build JSON
     scene = {
         "scene_name": f"bedroom_{tier}_seed{stable_int_hash(str(rng.random()))}",
         "room": {
@@ -844,23 +1322,37 @@ def build_one_scene(
             "corridor_rects_xyxy_m": [[round(v, 4) for v in r] for r in corridor_rects],
             "corridor_reserved_xyxy_m": [[round(v, 4) for v in r] for r in corridor_reserved],
             "reachability_mode": reach_mode,
+            "grid_res_m": GRID_RES,
+
+            "difficulty_level_0_to_3": int(difficulty),
+            "corridor_obj_height_max_m": CORRIDOR_HEIGHT_BUDGET[difficulty]["max"],
+            "corridor_obj_height_prefer_min_m": CORRIDOR_HEIGHT_BUDGET[difficulty]["prefer_min"],
+            "front_pass_width_m": FRONT_PASS_WIDTH_M,
+            "side_pass_width_m": SIDE_PASS_WIDTH_M,
             "humanoid_radius_main_m": HUMANOID_RADIUS_MAIN,
             "humanoid_radius_side_m": HUMANOID_RADIUS_SIDE,
-            "sideways_min_width_m": SIDEWAYS_MIN_WIDTH_M,
-            "grid_res_m": GRID_RES,
-            "passable_on_corridor_classes": sorted(list(PASSABLE_ON_CORRIDOR_CLASSES)),
-            "markers": {
-                "born_origin_prim": "/World/Assets/born_origin",
-                "destination_prim": "/World/Assets/destination",
-                "born_origin_color_rgba": getattr(born_marker, "_marker_color", [0, 1, 0, 1]),
-                "destination_color_rgba": getattr(dest_marker, "_marker_color", [1, 0, 0, 1]),
+
+            "forced_step_items_on_corridor": forced_step_items,
+            "step_over_on_corridor_count": step_on_corridor,
+
+            # annealing meta
+            "anneal_fail_window": FAIL_WINDOW,
+            "anneal_level": int(attempt_index // FAIL_WINDOW),
+            "counts_used": {
+                "chairs": int(chair_n),
+                "small_items": int(small_item_n),
+                "cluster_items": int(cluster_item_n),
+                "forced_step_items_max": int(forced_step_items_max),
+                "wall_big_max": int(wall_big_max),
             },
+
+            "step_over_candidate_classes": sorted(list(STEP_OVER_CANDIDATE_CLASSES)),
         },
         "objects": []
     }
 
     for p in placed:
-        scene["objects"].append({
+        obj_dict = {
             "name": p.name,
             "class": p.cls,
             "usd_path": p.usd_path,
@@ -869,12 +1361,22 @@ def build_one_scene(
                 "pos": [round(p.pos[0], 4), round(p.pos[1], 4), round(p.pos[2], 4)],
                 "rot_deg": [round(p.rot_deg[0], 3), round(p.rot_deg[1], 3), round(p.rot_deg[2], 3)]
             },
-            "rigid_body": bool(p.rigid_body)
-        })
+            "rigid_body": bool(p.rigid_body),
+            "aabb_height_m": round(float(p.height_m), 4),
+            "is_step_over": bool(p.is_step_over),
+        }
+        # Marker objects carry colour info for the cone primitive
+        if p.cls == "marker":
+            kind = "origin" if "origin" in p.name else "dest"
+            obj_dict["marker_color_rgba"] = MARKER_COLORS[kind]
+            obj_dict["marker_radius_m"] = MARKER_RADIUS
+            obj_dict["marker_height_m"] = MARKER_HEIGHT
+        scene["objects"].append(obj_dict)
 
     scene["meta"] = {
         "tier": tier,
         "room_w_l_h": [room_w, room_l, room_h],
+        "atom_mode": bool(atom),
         "counts": {
             "chairs": chair_n,
             "scatter_items": small_item_n,
@@ -889,10 +1391,13 @@ def build_one_scene(
 def generate_scene_with_retries(
     assets: Dict[str, Dict[str, AssetAABB]],
     base_seed: int,
-    max_attempts: int = 200,
+    max_attempts: int = 2000,
     require_reachable: bool = True,
-    require_side_only: bool = False,
     forced_tier: Optional[str] = None,
+    fixed_room_w: Optional[float] = None,
+    fixed_room_l: Optional[float] = None,
+    difficulty: Optional[int] = None,
+    atom: bool = False,
 ) -> Dict:
     last_err = None
     for k in range(max_attempts):
@@ -902,8 +1407,12 @@ def generate_scene_with_retries(
                 assets=assets,
                 rng=rng,
                 require_reachable=require_reachable,
-                require_side_only=require_side_only,
                 forced_tier=forced_tier,
+                fixed_room_w=fixed_room_w,
+                fixed_room_l=fixed_room_l,
+                difficulty=difficulty,
+                attempt_index=k,
+                atom=atom,
             )
             scene.setdefault("meta", {})
             scene["meta"].update({
@@ -921,15 +1430,68 @@ def generate_scene_with_retries(
 # -------------------- CLI --------------------
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--registry", required=True, help="Path to asset_registry.csv")
-    p.add_argument("--output", required=True, help="Output scene JSON path")
+    p.add_argument("--registry", required=True,
+                   help="Path to asset_registry.csv (original / high-fidelity).")
+    p.add_argument("--registry_simplified", default=None,
+                   help="Path to simplified asset_registry.csv.  When set, outputs dual JSONs "
+                        "(*_original.json + *_simplified.json) per scene.")
+    p.add_argument("--output", required=True,
+                   help="Output path. Single scene: a .json file.  Batch (--count>1): a directory.")
     p.add_argument("--seed", type=int, default=GLOBAL_SEED)
-    p.add_argument("--attempts", type=int, default=200)
+    p.add_argument("--attempts", type=int, default=2000)
     p.add_argument("--no_reachability", action="store_true", help="Disable reachability check")
-    p.add_argument("--require_side_only", action="store_true", help="Require that only SIDE mode is reachable (main must fail)")
     p.add_argument("--tier", choices=["small", "medium", "large", "random"], default="random",
                    help="Force room size tier; default random.")
+    p.add_argument("--room_w", type=float, default=None, help="Force room width (meters), e.g. 3.0")
+    p.add_argument("--room_l", type=float, default=None, help="Force room length (meters), e.g. 5.0")
+    p.add_argument("--difficulty", type=int, default=None, choices=[0, 1, 2, 3],
+                   help="Force difficulty level 0..3. If not set, random.")
+    p.add_argument("--count", type=int, default=1,
+                   help="Number of scenes to generate (default 1). "
+                        "When >1, --output is treated as a directory.")
+    p.add_argument("--atom_count", type=int, default=0,
+                   help="Number of atom-action scenes per difficulty (d2, d3 only). "
+                        "Atom scenes contain ONLY the single difficulty action + basic walking. "
+                        "Output to bedroom_d{N}_atom/ with _atom suffix in filenames.")
     return p.parse_args()
+
+
+def _print_scene_summary(scene: Dict, path: str):
+    print(f"  {path}")
+    d = scene["nav"]["difficulty_level_0_to_3"]
+    n = len(scene["objects"])
+    mode = scene["nav"]["reachability_mode"]
+    ann = scene["nav"]["anneal_level"]
+    print(f"    difficulty={d}  objects={n}  reach={mode}  anneal_level={ann}")
+
+
+def _write_scene_json(scene, path):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(scene, f, indent=2)
+
+
+def _write_dual_or_single(scene, base_path, usd_path_map):
+    """Write one or two JSONs depending on whether dual output is enabled.
+    Returns list of paths written."""
+    written = []
+    if usd_path_map:
+        p = Path(base_path)
+        stem = p.stem
+        parent = p.parent
+        path_orig = parent / f"{stem}_original.json"
+        path_simp = parent / f"{stem}_simplified.json"
+
+        _write_scene_json(scene, path_orig)
+        written.append(str(path_orig))
+
+        scene_simp = _remap_scene_usd_paths(scene, usd_path_map)
+        _write_scene_json(scene_simp, path_simp)
+        written.append(str(path_simp))
+    else:
+        _write_scene_json(scene, base_path)
+        written.append(str(base_path))
+    return written
 
 
 def main():
@@ -937,32 +1499,109 @@ def main():
     assets = load_registry(args.registry)
     forced_tier = None if args.tier == "random" else args.tier
 
-    scene = generate_scene_with_retries(
-        assets=assets,
-        base_seed=args.seed,
-        max_attempts=args.attempts,
-        require_reachable=(not args.no_reachability),
-        require_side_only=args.require_side_only and (not args.no_reachability),
-        forced_tier=forced_tier,
-    )
+    # Dual output: original + simplified
+    usd_path_map = {}
+    if args.registry_simplified:
+        assets_simp = load_registry(args.registry_simplified)
+        usd_path_map = _build_usd_path_map(assets, assets_simp)
+        print(f"Dual output enabled: {len(usd_path_map)} asset path mappings loaded")
 
-    out_path = Path(args.output)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(scene, f, indent=2)
+    count = max(1, args.count)
 
-    print("Generated:", str(out_path))
-    print("Scene:", scene["scene_name"])
-    print("Tier:", scene["meta"]["tier"])
-    print("Room:", scene["room"]["size_m"])
-    print("Objects:", len(scene["objects"]))
-    print("Reachability:", scene["nav"]["reachability_mode"])
-    print("Corridor width (m):", scene["nav"]["corridor_width_m"])
-    print("Passable-on-corridor:", scene["nav"]["passable_on_corridor_classes"])
-    print("Origin zone:", scene["nav"]["origin_zone_xyxy_m"])
-    print("Dest zone:", scene["nav"]["dest_zone_xyxy_m"])
-    print("Wall big classes:", scene["meta"]["counts"]["wall_big_classes"])
-    print("Meta:", {k: scene["meta"][k] for k in ["base_seed", "attempt_index", "final_seed"]})
+    if count == 1:
+        # --- Single scene mode ---
+        scene = generate_scene_with_retries(
+            assets=assets,
+            base_seed=args.seed,
+            max_attempts=args.attempts,
+            require_reachable=(not args.no_reachability),
+            forced_tier=forced_tier,
+            fixed_room_w=args.room_w,
+            fixed_room_l=args.room_l,
+            difficulty=args.difficulty,
+        )
+
+        out_path = Path(args.output)
+        written = _write_dual_or_single(scene, str(out_path), usd_path_map)
+        for w in written:
+            _print_scene_summary(scene, w)
+    else:
+        # --- Batch mode ---
+        out_dir = Path(args.output)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        difficulties = [args.difficulty] if args.difficulty is not None else [0, 1, 2, 3]
+        atom_count = max(0, args.atom_count)
+        # Atom scenes only apply to d2 and d3
+        atom_difficulties = [d for d in difficulties if d in (2, 3)]
+        total_combo = count * len(difficulties)
+        total_atom = atom_count * len(atom_difficulties)
+        total = total_combo + total_atom
+        generated = 0
+        failed = 0
+
+        mode = "dual (original + simplified)" if usd_path_map else "single"
+        print(f"Batch: {count} combo x {len(difficulties)} diff + "
+              f"{atom_count} atom x {len(atom_difficulties)} diff = {total} scenes  [{mode}]")
+        print(f"Output directory: {out_dir}\n")
+
+        # --- Combo scenes (full difficulty subset) ---
+        for diff in difficulties:
+            diff_dir = out_dir / f"bedroom_d{diff}"
+            diff_dir.mkdir(parents=True, exist_ok=True)
+            for idx in range(count):
+                seed = args.seed + diff * 100000 + idx * 997
+                base_name = f"bedroom_d{diff}_{idx:03d}"
+                base_path = diff_dir / f"{base_name}.json"
+                try:
+                    scene = generate_scene_with_retries(
+                        assets=assets,
+                        base_seed=seed,
+                        max_attempts=args.attempts,
+                        require_reachable=(not args.no_reachability),
+                        forced_tier=forced_tier,
+                        fixed_room_w=args.room_w,
+                        fixed_room_l=args.room_l,
+                        difficulty=diff,
+                        atom=False,
+                    )
+                    written = _write_dual_or_single(scene, str(base_path), usd_path_map)
+                    generated += 1
+                    _print_scene_summary(scene, written[0])
+                except Exception as e:
+                    failed += 1
+                    print(f"  [FAIL] {base_name}: {e}")
+
+        # --- Atom scenes (single difficulty action only, d2 and d3) ---
+        if atom_count > 0:
+            print(f"\n--- Atom scenes (d2, d3 only) ---")
+            for diff in atom_difficulties:
+                atom_dir = out_dir / f"bedroom_d{diff}_atom"
+                atom_dir.mkdir(parents=True, exist_ok=True)
+                for idx in range(atom_count):
+                    seed = args.seed + diff * 100000 + 50000 + idx * 997
+                    base_name = f"bedroom_d{diff}_{idx:03d}_atom"
+                    base_path = atom_dir / f"{base_name}.json"
+                    try:
+                        scene = generate_scene_with_retries(
+                            assets=assets,
+                            base_seed=seed,
+                            max_attempts=args.attempts,
+                            require_reachable=(not args.no_reachability),
+                            forced_tier=forced_tier,
+                            fixed_room_w=args.room_w,
+                            fixed_room_l=args.room_l,
+                            difficulty=diff,
+                            atom=True,
+                        )
+                        written = _write_dual_or_single(scene, str(base_path), usd_path_map)
+                        generated += 1
+                        _print_scene_summary(scene, written[0])
+                    except Exception as e:
+                        failed += 1
+                        print(f"  [FAIL] {base_name}: {e}")
+
+        print(f"\nBatch done: {generated}/{total} generated, {failed} failed.")
 
 
 if __name__ == "__main__":
