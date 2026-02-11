@@ -1,9 +1,16 @@
 # scene_json_generator.py
-# Difficulty (0..3) is locomotion-action-driven:
-# 0: FRONT pass + NO step-over on corridor
-# 1: FRONT pass + YES step-over on corridor
-# 2: SIDE  pass + NO step-over on corridor (front must fail)
-# 3: SIDE  pass + YES step-over on corridor (front must fail)
+# Difficulty (0..3) is locomotion-action-driven.
+# The criterion is the BOTTLENECK (narrowest point) along the best viable path:
+#
+# 0: bottleneck >= 1m  (FRONT pass),  corridor CLEAR  (no step-over)
+# 1: bottleneck >= 1m  (FRONT pass),  step-over obstacles ON the wide corridor
+# 2: bottleneck < 1m but >= 0.5m (SIDE pass forced), corridor CLEAR (no step-over)
+# 3: bottleneck < 1m but >= 0.5m (SIDE pass forced), step-over AT the narrow section
+#
+# Validation is via BFS reachability over the whole room (not just the corridor):
+#   main BFS (radius 0.50m) checks for >= 1m passages
+#   side BFS (radius 0.25m) checks for >= 0.5m passages
+# d0/d1 require main=pass;  d2/d3 require main=fail AND side=pass.
 #
 # Adds annealing for crowdedness: after repeated failures, reduce item counts.
 # Ensures: bed always exists; chair count >= 1 even under annealing.
@@ -20,6 +27,10 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from room_configs import get_config, RoomConfig
 
 
 # -------------------- Defaults --------------------
@@ -70,18 +81,19 @@ ROOM_TIERS = {
 }
 ROOM_TIER_PROBS = [0.35, 0.45, 0.20]  # small/medium/large
 
-# Crowdedness (realistic household counts)
+# Crowdedness (high initial counts — annealing will reduce if needed)
 TIER_COUNTS = {
-    "small":  {"chairs": (0, 1), "small_items": (3, 6),  "cluster_items": (2, 4)},
-    "medium": {"chairs": (1, 2), "small_items": (5, 10), "cluster_items": (3, 6)},
-    "large":  {"chairs": (1, 2), "small_items": (8, 14), "cluster_items": (4, 8)},
+    "small":  {"chairs": (1, 2), "small_items": (5, 10),  "cluster_items": (3, 6)},
+    "medium": {"chairs": (1, 3), "small_items": (8, 16),  "cluster_items": (5, 10)},
+    "large":  {"chairs": (2, 3), "small_items": (12, 20), "cluster_items": (6, 12)},
 }
 
-# Corridor width fallback/global ranges.
+# Corridor width outer ranges (must span both d0/d1 wide and d2/d3 narrow).
+# Upper bounds raised so d0/d1 can reliably pass main BFS (corridor >= 1.12m).
 CORRIDOR_WIDTH_RANGE_BY_TIER = {
-    "small":  (0.52, 1.05),
-    "medium": (0.52, 1.10),
-    "large":  (0.52, 1.20),
+    "small":  (0.62, 1.20),
+    "medium": (0.62, 1.30),
+    "large":  (0.62, 1.40),
 }
 CORRIDOR_MARGIN = 0.05  # inflate corridor "reserved" rect a bit (for big objects)
 
@@ -89,11 +101,11 @@ BIG_YAW_CHOICES = [0.0, 90.0, 180.0, 270.0]
 
 # Wall-hugging big items: each selected CLASS appears at most ONE instance
 WALL_BIG_CLASS_PROBS = {
-    "small":  {"wardrobe": 0.35, "suitcase": 0.45, "desk": 0.30, "cabinet": 0.25},
-    "medium": {"wardrobe": 0.55, "suitcase": 0.55, "desk": 0.55, "cabinet": 0.45},
-    "large":  {"wardrobe": 0.70, "suitcase": 0.65, "desk": 0.75, "cabinet": 0.65},
+    "small":  {"wardrobe": 0.60, "suitcase": 0.65, "desk": 0.55, "cabinet": 0.50},
+    "medium": {"wardrobe": 0.80, "suitcase": 0.75, "desk": 0.80, "cabinet": 0.70},
+    "large":  {"wardrobe": 0.90, "suitcase": 0.85, "desk": 0.90, "cabinet": 0.85},
 }
-WALL_BIG_MAX_BY_TIER = {"small": 2, "medium": 3, "large": 4}
+WALL_BIG_MAX_BY_TIER = {"small": 3, "medium": 4, "large": 5}
 
 # Candidate classes that may be placed on the corridor as step-over obstacles.
 STEP_OVER_CANDIDATE_CLASSES = {
@@ -236,12 +248,13 @@ def make_shoe_pair_placed(
     )
 
 
-def is_corridor_passable(aabb: AssetAABB, difficulty: int) -> bool:
+def is_corridor_passable(aabb: AssetAABB, difficulty: int, step_over_classes: set = None) -> bool:
     """Can this asset be stepped over on the corridor at the given difficulty?"""
     max_h = CORRIDOR_HEIGHT_BUDGET[difficulty]["max"]
     if max_h <= 0:
         return False
-    if aabb.cls not in STEP_OVER_CANDIDATE_CLASSES:
+    candidates = step_over_classes if step_over_classes is not None else STEP_OVER_CANDIDATE_CLASSES
+    if aabb.cls not in candidates:
         return False
     return aabb.height_m <= max_h
 
@@ -276,6 +289,7 @@ def compute_dynamic_counts(
     attempt_index: int,
     difficulty: int = 0,
     fail_window: int = FAIL_WINDOW,
+    config: "RoomConfig" = None,
 ) -> Tuple[int, int, int, int, int]:
     """
     Returns (chair_n, small_item_n, cluster_item_n, forced_step_items_max, wall_big_max)
@@ -290,9 +304,10 @@ def compute_dynamic_counts(
 
     Difficulty 0: chair minimum = 0  (simplest environment, chairs optional)
     Difficulty 1-3: chair minimum = 1
-    Bed is always placed (handled outside this function).
+    Anchor item is always placed (handled outside this function).
     """
-    base = TIER_COUNTS[tier]
+    tier_counts = config.tier_counts if config else TIER_COUNTS
+    base = tier_counts[tier]
     anneal_level = attempt_index // fail_window  # 0,1,2,...
 
     chair_lo, chair_hi = base["chairs"]
@@ -309,7 +324,8 @@ def compute_dynamic_counts(
     chair_n = max(chair_min, chair_n)
 
     # Wall-big cap from tier default
-    wall_big_base = WALL_BIG_MAX_BY_TIER.get(tier, 3)
+    wbm = config.wall_big_max_by_tier if config else WALL_BIG_MAX_BY_TIER
+    wall_big_base = wbm.get(tier, 3)
 
     # --- Annealing schedule (priority: scatter > cluster > wall_big > step > chairs) ---
     # Scatter: reduce starting level 1, floor at 0
@@ -324,7 +340,7 @@ def compute_dynamic_counts(
     wall_big_max = max(0, wall_big_base - max(0, anneal_level - 2))
 
     # Forced step-over: reduce starting level 4 (keep >=1 for difficulty that needs it)
-    forced_step_items_max = max(1, 3 - max(0, anneal_level - 3))
+    forced_step_items_max = max(1, 4 - max(0, anneal_level - 3))
 
     # Chairs: reduce LAST, starting level 5
     chair_drop = max(0, anneal_level - 4)
@@ -356,6 +372,20 @@ def _remap_scene_usd_paths(scene: Dict, usd_path_map: Dict[str, str]) -> Dict:
         if orig and orig in usd_path_map:
             obj["usd_path"] = usd_path_map[orig]
     return s
+
+
+def load_texture_catalog(path: str) -> Dict:
+    """Load and validate a texture_catalog.json file."""
+    with open(path, "r", encoding="utf-8") as f:
+        catalog = json.load(f)
+    for surface in ("floor", "wall"):
+        if surface not in catalog or not catalog[surface]:
+            raise RuntimeError(f"Texture catalog missing or empty '{surface}' list in {path}")
+        for entry in catalog[surface]:
+            for key in ("id", "color", "normal", "roughness", "tiles_per_meter"):
+                if key not in entry:
+                    raise RuntimeError(f"Texture entry missing '{key}': {entry}")
+    return catalog
 
 
 def load_registry(csv_path: str) -> Dict[str, Dict[str, AssetAABB]]:
@@ -410,19 +440,21 @@ def pick_random_from_class(assets: Dict[str, Dict[str, AssetAABB]], cls: str, rn
 
 
 # -------------------- Sampling --------------------
-def choose_room_tier(rng: random.Random) -> str:
-    tiers = ["small", "medium", "large"]
+def choose_room_tier(rng: random.Random, config: "RoomConfig" = None) -> str:
+    tiers = list((config.room_tiers if config else ROOM_TIERS).keys())
+    probs = config.room_tier_probs if config else ROOM_TIER_PROBS
     x = rng.random()
     cum = 0.0
-    for t, p in zip(tiers, ROOM_TIER_PROBS):
+    for t, p in zip(tiers, probs):
         cum += p
         if x <= cum:
             return t
     return tiers[-1]
 
 
-def sample_room_size(tier: str, rng: random.Random) -> Tuple[float, float]:
-    r = ROOM_TIERS[tier]
+def sample_room_size(tier: str, rng: random.Random, config: "RoomConfig" = None) -> Tuple[float, float]:
+    room_tiers = config.room_tiers if config else ROOM_TIERS
+    r = room_tiers[tier]
     w = rng.uniform(r["w"][0], r["w"][1])
     l = rng.uniform(r["l"][0], r["l"][1])
     return round(w, 3), round(l, 3)
@@ -433,12 +465,13 @@ def resolve_room_size(
     rng: random.Random,
     fixed_w: Optional[float] = None,
     fixed_l: Optional[float] = None,
+    config: "RoomConfig" = None,
 ) -> Tuple[float, float]:
     if (fixed_w is None) ^ (fixed_l is None):
         raise RuntimeError("You must provide BOTH --room_w and --room_l, or neither.")
     if fixed_w is not None and fixed_l is not None:
         return round(float(fixed_w), 3), round(float(fixed_l), 3)
-    return sample_room_size(tier, rng)
+    return sample_room_size(tier, rng, config=config)
 
 
 def sample_free_zone_rect(
@@ -619,10 +652,16 @@ def is_reachable(
     humanoid_radius: float,
     grid_res: float,
 ) -> bool:
-    x0 = WALL_MARGIN
-    y0 = WALL_MARGIN
-    x1 = room_w - WALL_MARGIN
-    y1 = room_l - WALL_MARGIN
+    # The humanoid is modelled as a circle of `humanoid_radius`.  Its center
+    # cannot be closer than `humanoid_radius` to any wall, just as it cannot
+    # be closer than `humanoid_radius` to any obstacle (handled by inflation).
+    # Using WALL_MARGIN (0.06m) here would let the BFS treat walls as
+    # non-obstacles, allowing false "main" passages along walls.
+    margin = max(WALL_MARGIN, humanoid_radius)
+    x0 = margin
+    y0 = margin
+    x1 = room_w - margin
+    y1 = room_l - margin
     if x1 <= x0 or y1 <= y0:
         return False
 
@@ -716,15 +755,18 @@ def pick_wall_big_classes(
     tier: str,
     assets: Dict[str, Dict[str, AssetAABB]],
     rng: random.Random,
+    config: "RoomConfig" = None,
 ) -> List[str]:
-    probs = WALL_BIG_CLASS_PROBS.get(tier, {})
+    wbcp = config.wall_big_class_probs if config else WALL_BIG_CLASS_PROBS
+    probs = wbcp.get(tier, {})
     candidates = [c for c in probs.keys() if c in assets and assets[c]]
     selected = []
     for c in candidates:
         if rng.random() < probs[c]:
             selected.append(c)
     rng.shuffle(selected)
-    cap = WALL_BIG_MAX_BY_TIER.get(tier, 3)
+    wbm = config.wall_big_max_by_tier if config else WALL_BIG_MAX_BY_TIER
+    cap = wbm.get(tier, 3)
     return selected[:cap]
 
 
@@ -918,10 +960,12 @@ def build_one_scene(
     difficulty: Optional[int] = None,
     attempt_index: int = 0,
     atom: bool = False,
+    texture_catalog: Optional[Dict] = None,
+    config: Optional["RoomConfig"] = None,
 ) -> Dict:
     # Tier
     if forced_tier is None or forced_tier == "random":
-        tier = choose_room_tier(rng)
+        tier = choose_room_tier(rng, config=config)
     else:
         tier = forced_tier
 
@@ -931,12 +975,18 @@ def build_one_scene(
     if difficulty not in (0, 1, 2, 3):
         raise RuntimeError("difficulty must be 0..3")
 
-    room_w, room_l = resolve_room_size(tier, rng, fixed_room_w, fixed_room_l)
-    room_h = ROOM_HEIGHT
+    room_w, room_l = resolve_room_size(tier, rng, fixed_room_w, fixed_room_l, config=config)
+    room_h = config.room_height if config else ROOM_HEIGHT
+
+    # Read config-derived sets for use throughout
+    step_over_classes = config.step_over_candidate_classes if config else STEP_OVER_CANDIDATE_CLASSES
+    pair_classes = config.pair_classes if config else {"shoes"}
+    room_name = config.name if config else "bedroom"
 
     # Dynamic annealed counts (chairs reduced last; difficulty 0 may have 0 chairs)
     chair_n, small_item_n, cluster_item_n, forced_step_items_max, wall_big_max = compute_dynamic_counts(
-        tier=tier, rng=rng, attempt_index=attempt_index, difficulty=difficulty, fail_window=FAIL_WINDOW
+        tier=tier, rng=rng, attempt_index=attempt_index, difficulty=difficulty, fail_window=FAIL_WINDOW,
+        config=config,
     )
 
     placed: List[Placed] = []
@@ -955,16 +1005,32 @@ def build_one_scene(
     hard_forbidden.append(dest_zone)
 
     # 2) Corridor width sampled by difficulty
-    w_lo, w_hi = CORRIDOR_WIDTH_RANGE_BY_TIER[tier]
-    if difficulty in (0, 1):  # FRONT pass
-        lo = max(w_lo, FRONT_PASS_WIDTH_M + 0.02)
+    #
+    # BFS models the humanoid as a circle inflated around obstacles AND walls
+    # (see is_reachable).  Grid discretisation (GRID_RES=0.10m) means the
+    # free-zone width must exceed GRID_RES for reliable cell detection.
+    #
+    # d0/d1 (main BFS must PASS):  corridor_w >= 1.12m
+    #   worst case (furniture both sides): free = corridor_w - 2*(R_main - CORR_MARGIN)
+    #   = corridor_w - 0.90;  need >= GRID_RES+0.02 => corridor_w >= 1.12
+    #
+    # d2/d3 (main BFS must FAIL, side BFS must PASS):  0.62 <= corridor_w <= 0.76
+    #   near-wall worst case: free_main = corridor_w/2 - 0.29; need < GRID_RES => cw < 0.78
+    #   side free near-wall:  >= corridor_w/2 - 0.04;  need >= GRID_RES => cw >= 0.28 (easy)
+    #   side free both-sides: corridor_w - 0.40;  need >= GRID_RES+0.02 => cw >= 0.52
+    #   conservative: lo=0.62, hi=0.76
+    cwr = config.corridor_width_range_by_tier if config else CORRIDOR_WIDTH_RANGE_BY_TIER
+    w_lo, w_hi = cwr[tier]
+
+    if difficulty in (0, 1):  # FRONT pass — wide corridor
+        lo = max(w_lo, FRONT_PASS_WIDTH_M + GRID_RES + 0.02)  # 1.12m
         hi = w_hi
         if hi <= lo:
             raise RuntimeError("Tier corridor range cannot satisfy FRONT width.")
         corridor_w = rng.uniform(lo, hi)
-    else:  # SIDE-only
-        lo = max(w_lo, SIDE_PASS_WIDTH_M + 0.02)
-        hi = min(w_hi, FRONT_PASS_WIDTH_M - 0.02)
+    else:  # SIDE-only (d2, d3) — narrow bottleneck
+        lo = max(w_lo, SIDE_PASS_WIDTH_M + GRID_RES + 0.02)   # 0.62m
+        hi = min(w_hi, 0.76)                                   # main BFS must fail near walls
         if hi <= lo:
             raise RuntimeError("Tier corridor range cannot satisfy SIDE-only width.")
         corridor_w = rng.uniform(lo, hi)
@@ -988,29 +1054,33 @@ def build_one_scene(
     # atom mode skips this — atom scenes contain ONLY the single difficulty action
     force_step_off_corridor = (difficulty in (2, 3)) and (not atom)
 
-    # 3) Place bed (always at least one bed)
-    bed_candidates = [f"bed{idx:02d}" for idx in range(1, 20)]
-    bed_aabb = pick_existing_asset(assets, "bed", bed_candidates, rng)
-    bed_forbidden = hard_forbidden + corridor_reserved
-    (tx, ty), yaw, bed_rect, _ = place_against_wall(room_w, room_l, bed_aabb, bed_forbidden, rng, yaw_choices=BIG_YAW_CHOICES)
-    bed_z = place_on_floor_z(bed_aabb, spawn_extra=0.0)
-    bed_name = bed_aabb.asset
+    # 3) Place anchor item (bed / sofa — always at least one)
+    anchor_cls = config.anchor_class if config else "bed"
+    anchor_cands = config.anchor_candidates if config else [f"bed{idx:02d}" for idx in range(1, 20)]
+    if anchor_cands is not None:
+        anchor_aabb = pick_existing_asset(assets, anchor_cls, anchor_cands, rng)
+    else:
+        anchor_aabb = pick_random_from_class(assets, anchor_cls, rng)
+    anchor_forbidden = hard_forbidden + corridor_reserved
+    (tx, ty), yaw, anchor_rect, _ = place_against_wall(room_w, room_l, anchor_aabb, anchor_forbidden, rng, yaw_choices=BIG_YAW_CHOICES)
+    anchor_z = place_on_floor_z(anchor_aabb, spawn_extra=0.0)
+    anchor_name = anchor_aabb.asset
     placed.append(Placed(
-        name=bed_name,
-        cls="bed",
-        usd_path=bed_aabb.dst_usd,
-        prim_path=f"/World/Assets/{bed_name}",
-        pos=(tx, ty, bed_z),
+        name=anchor_name,
+        cls=anchor_cls,
+        usd_path=anchor_aabb.dst_usd,
+        prim_path=f"/World/Assets/{anchor_name}",
+        pos=(tx, ty, anchor_z),
         rot_deg=(0.0, 0.0, yaw),
         rigid_body=False,
-        rect=bed_rect,
-        height_m=bed_aabb.height_m,
-        is_step_over=is_corridor_passable(bed_aabb, difficulty),
+        rect=anchor_rect,
+        height_m=anchor_aabb.height_m,
+        is_step_over=is_corridor_passable(anchor_aabb, difficulty, step_over_classes),
     ))
-    commit_object_rect(bed_rect)
+    commit_object_rect(anchor_rect)
 
     # 4) Wall-hugging big items (avoid corridor_reserved, capped by annealing)
-    wall_big_classes = pick_wall_big_classes(tier, assets, rng)
+    wall_big_classes = pick_wall_big_classes(tier, assets, rng, config=config)
     wall_big_classes = wall_big_classes[:wall_big_max]
     for cls in wall_big_classes:
         big_aabb = pick_random_from_class(assets, cls, rng)
@@ -1028,45 +1098,49 @@ def build_one_scene(
             rigid_body=False,
             rect=rect,
             height_m=big_aabb.height_m,
-            is_step_over=is_corridor_passable(big_aabb, difficulty),
+            is_step_over=is_corridor_passable(big_aabb, difficulty, step_over_classes),
         ))
         commit_object_rect(rect)
 
-    # 5) Chairs with 2-stage placement (chairs are reduced LAST by annealing)
+    # 5) Free-medium items with 2-stage placement (reduced LAST by annealing)
     # Stage A: avoid corridor_reserved
     # Stage B: allow corridor_reserved (fallback), reachability later filters bad cases
-    if chair_n > 0 and ("chair" not in assets or not assets["chair"]):
-        raise RuntimeError("Chair class missing in registry but chairs are required.")
+    free_med_classes = config.free_medium_classes if config else ["chair"]
+    # Filter to classes that exist in registry
+    free_med_avail = [c for c in free_med_classes if c in assets and assets[c]]
+    if chair_n > 0 and not free_med_avail:
+        raise RuntimeError("No free-medium classes available in registry but chairs/items are required.")
 
     for k in range(chair_n):
-        chair_aabb = pick_random_from_class(assets, "chair", rng)
+        fm_cls = rng.choice(free_med_avail) if free_med_avail else "chair"
+        fm_aabb = pick_random_from_class(assets, fm_cls, rng)
 
         # Stage A
         try:
             forb_A = hard_forbidden + corridor_reserved
             (tx, ty), yaw, rect = sample_free_pose_any_yaw(
-                room_w, room_l, chair_aabb, forb_A, rng, yaw_range=(0.0, 360.0), max_tries=12000
+                room_w, room_l, fm_aabb, forb_A, rng, yaw_range=(0.0, 360.0), max_tries=12000
             )
         except Exception:
             # Stage B (fallback)
             forb_B = hard_forbidden  # allow corridor_reserved
             (tx, ty), yaw, rect = sample_free_pose_any_yaw(
-                room_w, room_l, chair_aabb, forb_B, rng, yaw_range=(0.0, 360.0), max_tries=18000
+                room_w, room_l, fm_aabb, forb_B, rng, yaw_range=(0.0, 360.0), max_tries=18000
             )
 
-        z = place_on_floor_z(chair_aabb, spawn_extra=0.0)
-        name = f"chair_{k:02d}_{chair_aabb.asset}"
+        z = place_on_floor_z(fm_aabb, spawn_extra=0.0)
+        name = f"{fm_cls}_{k:02d}_{fm_aabb.asset}"
         placed.append(Placed(
             name=name,
-            cls="chair",
-            usd_path=chair_aabb.dst_usd,
+            cls=fm_cls,
+            usd_path=fm_aabb.dst_usd,
             prim_path=f"/World/Assets/{name}",
             pos=(tx, ty, z),
             rot_deg=(0.0, 0.0, yaw),
             rigid_body=False,
             rect=rect,
-            height_m=chair_aabb.height_m,
-            is_step_over=is_corridor_passable(chair_aabb, difficulty),
+            height_m=fm_aabb.height_m,
+            is_step_over=is_corridor_passable(fm_aabb, difficulty, step_over_classes),
         ))
         commit_object_rect(rect)
 
@@ -1081,7 +1155,7 @@ def build_one_scene(
     #         (object spans corridor width so robot MUST step over while sidestepping)
     forced_step_items = 0
     if allow_step_on_corridor:
-        step_classes = [c for c in STEP_OVER_CANDIDATE_CLASSES if c in assets and assets[c]]
+        step_classes = [c for c in step_over_classes if c in assets and assets[c]]
         if step_classes:
             forced_step_items = rng.randint(1, forced_step_items_max)
             for kk in range(forced_step_items):
@@ -1117,7 +1191,7 @@ def build_one_scene(
                 ))
                 commit_object_rect(rect)
                 # Shoe pair
-                if aabb.cls == "shoes":
+                if aabb.cls in pair_classes:
                     pair = make_shoe_pair_placed(aabb, name, prim, tx, ty, z, yaw, rect, True, room_w, room_l, hard_forbidden, rng)
                     if pair:
                         placed.append(pair)
@@ -1128,7 +1202,7 @@ def build_one_scene(
     #     are separate sequential challenges.
     #     Skipped in atom mode (atom = single difficulty action only).
     if force_step_off_corridor:
-        step_classes = [c for c in STEP_OVER_CANDIDATE_CLASSES if c in assets and assets[c]]
+        step_classes = [c for c in step_over_classes if c in assets and assets[c]]
         if step_classes:
             n_forced_room = rng.randint(1, max(1, forced_step_items_max))
             for kk in range(n_forced_room):
@@ -1157,17 +1231,17 @@ def build_one_scene(
                     is_step_over=True,
                 ))
                 commit_object_rect(rect)
-                if aabb.cls == "shoes":
+                if aabb.cls in pair_classes:
                     pair = make_shoe_pair_placed(aabb, name, prim, tx, ty, z, yaw, rect, True, room_w, room_l, hard_forbidden, rng)
                     if pair:
                         placed.append(pair)
                         commit_object_rect(pair.rect)
 
     # 7) Cluster clutter near bed
-    cluster_classes = ["shoes", "blanket", "box", "book", "bottle", "pillow", "laptop"]
-    cluster_classes = [c for c in cluster_classes if c in assets and assets[c]]
+    cluster_classes_base = config.cluster_classes if config else ["shoes", "blanket", "box", "book", "bottle", "pillow", "laptop"]
+    cluster_classes = [c for c in cluster_classes_base if c in assets and assets[c]]
 
-    bx0, by0, bx1, by1 = bed_rect
+    bx0, by0, bx1, by1 = anchor_rect
     cluster_cx = (bx0 + bx1) * 0.5
     cluster_cy = (by0 + by1) * 0.5
 
@@ -1177,7 +1251,7 @@ def build_one_scene(
         return cx + r * math.cos(t), cy + r * math.sin(t)
 
     def place_biased_any_yaw(aabb: AssetAABB, center: Tuple[float, float], spread: float) -> Tuple[Tuple[float, float], float, Tuple[float, float, float, float]]:
-        passable = is_corridor_passable(aabb, difficulty)
+        passable = is_corridor_passable(aabb, difficulty, step_over_classes)
         if passable:
             forb = hard_forbidden + (corridor_reserved if forbid_step_on_corridor else [])
         else:
@@ -1211,7 +1285,7 @@ def build_one_scene(
         z = place_on_floor_z(aabb, spawn_extra=0.0)
         name = f"{cls}_cluster_{k:02d}_{aabb.asset}"
         prim = f"/World/Assets/{name}"
-        step_over = is_corridor_passable(aabb, difficulty)
+        step_over = is_corridor_passable(aabb, difficulty, step_over_classes)
         placed.append(Placed(
             name=name,
             cls=cls,
@@ -1226,22 +1300,22 @@ def build_one_scene(
         ))
         commit_object_rect(rect)
         # Shoe pair
-        if cls == "shoes":
+        if cls in pair_classes:
             pair = make_shoe_pair_placed(aabb, name, prim, tx, ty, z, yaw, rect, step_over, room_w, room_l, hard_forbidden, rng)
             if pair:
                 placed.append(pair)
                 commit_object_rect(pair.rect)
 
     # 8) Scattered small items
-    scatter_classes = ["shoes", "blanket", "box", "book", "bottle", "pillow", "laptop"]
-    scatter_classes = [c for c in scatter_classes if c in assets and assets[c]]
+    scatter_classes_base = config.scatter_classes if config else ["shoes", "blanket", "box", "book", "bottle", "pillow", "laptop"]
+    scatter_classes = [c for c in scatter_classes_base if c in assets and assets[c]]
 
     for k in range(small_item_n):
         if not scatter_classes:
             break
         cls = rng.choice(scatter_classes)
         aabb = pick_random_from_class(assets, cls, rng)
-        passable = is_corridor_passable(aabb, difficulty)
+        passable = is_corridor_passable(aabb, difficulty, step_over_classes)
 
         if passable:
             forb = hard_forbidden + (corridor_reserved if forbid_step_on_corridor else [])
@@ -1267,7 +1341,7 @@ def build_one_scene(
         ))
         commit_object_rect(rect)
 
-        if cls == "shoes":
+        if cls in pair_classes:
             pair = make_shoe_pair_placed(aabb, name, f"/World/Assets/{name}", tx, ty, z, yaw, rect, passable, room_w, room_l, hard_forbidden, rng)
             if pair:
                 placed.append(pair)
@@ -1306,14 +1380,38 @@ def build_one_scene(
     if forbid_step_on_corridor and step_on_corridor > 0:
         raise RuntimeError("Difficulty requires NO step-over on corridor, but found some.")
 
-    # 12) Build JSON
+    # 12) Pick textures (if catalog provided)
+    if texture_catalog is not None:
+        floor_tex = rng.choice(texture_catalog["floor"])
+        wall_tex = rng.choice(texture_catalog["wall"])
+        floor_material = {
+            "texture_id": floor_tex["id"],
+            "color": floor_tex["color"],
+            "normal": floor_tex["normal"],
+            "roughness": floor_tex["roughness"],
+            "tiles_per_meter": floor_tex["tiles_per_meter"],
+        }
+        wall_material = {
+            "texture_id": wall_tex["id"],
+            "color": wall_tex["color"],
+            "normal": wall_tex["normal"],
+            "roughness": wall_tex["roughness"],
+            "tiles_per_meter": wall_tex["tiles_per_meter"],
+        }
+    else:
+        floor_material = None
+        wall_material = None
+
+    # 13) Build JSON
     scene = {
-        "scene_name": f"bedroom_{tier}_seed{stable_int_hash(str(rng.random()))}",
+        "scene_name": f"{room_name}_{tier}_seed{stable_int_hash(str(rng.random()))}",
         "room": {
             "size_m": [room_w, room_l, room_h],
             "wall_thickness_m": WALL_THICKNESS,
             "floor_thickness_m": FLOOR_THICKNESS,
             "origin_m": [0.0, 0.0, 0.0],
+            "floor_material": floor_material,
+            "wall_material": wall_material,
         },
         "nav": {
             "origin_zone_xyxy_m": [round(v, 4) for v in origin_zone],
@@ -1346,7 +1444,7 @@ def build_one_scene(
                 "wall_big_max": int(wall_big_max),
             },
 
-            "step_over_candidate_classes": sorted(list(STEP_OVER_CANDIDATE_CLASSES)),
+            "step_over_candidate_classes": sorted(list(step_over_classes)),
         },
         "objects": []
     }
@@ -1398,6 +1496,8 @@ def generate_scene_with_retries(
     fixed_room_l: Optional[float] = None,
     difficulty: Optional[int] = None,
     atom: bool = False,
+    texture_catalog: Optional[Dict] = None,
+    config: Optional["RoomConfig"] = None,
 ) -> Dict:
     last_err = None
     for k in range(max_attempts):
@@ -1413,6 +1513,8 @@ def generate_scene_with_retries(
                 difficulty=difficulty,
                 attempt_index=k,
                 atom=atom,
+                texture_catalog=texture_catalog,
+                config=config,
             )
             scene.setdefault("meta", {})
             scene["meta"].update({
@@ -1453,6 +1555,11 @@ def parse_args():
                    help="Number of atom-action scenes per difficulty (d2, d3 only). "
                         "Atom scenes contain ONLY the single difficulty action + basic walking. "
                         "Output to bedroom_d{N}_atom/ with _atom suffix in filenames.")
+    p.add_argument("--textures", type=str, default=None,
+                   help="Path to texture_catalog.json.  When set, each scene gets "
+                        "random floor_material and wall_material entries in the room dict.")
+    p.add_argument("--room_type", type=str, default="bedroom",
+                   help="Room type config to use (bedroom, livingroom, etc.). Default: bedroom.")
     return p.parse_args()
 
 
@@ -1499,6 +1606,18 @@ def main():
     assets = load_registry(args.registry)
     forced_tier = None if args.tier == "random" else args.tier
 
+    # Room config
+    config = get_config(args.room_type)
+    room_name = config.name
+    print(f"Room type: {room_name}")
+
+    # Texture catalog (optional)
+    texture_catalog = None
+    if args.textures:
+        texture_catalog = load_texture_catalog(args.textures)
+        print(f"Texture catalog loaded: {len(texture_catalog['floor'])} floor, "
+              f"{len(texture_catalog['wall'])} wall textures")
+
     # Dual output: original + simplified
     usd_path_map = {}
     if args.registry_simplified:
@@ -1519,6 +1638,8 @@ def main():
             fixed_room_w=args.room_w,
             fixed_room_l=args.room_l,
             difficulty=args.difficulty,
+            texture_catalog=texture_catalog,
+            config=config,
         )
 
         out_path = Path(args.output)
@@ -1547,11 +1668,11 @@ def main():
 
         # --- Combo scenes (full difficulty subset) ---
         for diff in difficulties:
-            diff_dir = out_dir / f"bedroom_d{diff}"
+            diff_dir = out_dir / f"{room_name}_d{diff}"
             diff_dir.mkdir(parents=True, exist_ok=True)
             for idx in range(count):
                 seed = args.seed + diff * 100000 + idx * 997
-                base_name = f"bedroom_d{diff}_{idx:03d}"
+                base_name = f"{room_name}_d{diff}_{idx:03d}"
                 base_path = diff_dir / f"{base_name}.json"
                 try:
                     scene = generate_scene_with_retries(
@@ -1564,6 +1685,8 @@ def main():
                         fixed_room_l=args.room_l,
                         difficulty=diff,
                         atom=False,
+                        texture_catalog=texture_catalog,
+                        config=config,
                     )
                     written = _write_dual_or_single(scene, str(base_path), usd_path_map)
                     generated += 1
@@ -1576,11 +1699,11 @@ def main():
         if atom_count > 0:
             print(f"\n--- Atom scenes (d2, d3 only) ---")
             for diff in atom_difficulties:
-                atom_dir = out_dir / f"bedroom_d{diff}_atom"
+                atom_dir = out_dir / f"{room_name}_d{diff}_atom"
                 atom_dir.mkdir(parents=True, exist_ok=True)
                 for idx in range(atom_count):
                     seed = args.seed + diff * 100000 + 50000 + idx * 997
-                    base_name = f"bedroom_d{diff}_{idx:03d}_atom"
+                    base_name = f"{room_name}_d{diff}_{idx:03d}_atom"
                     base_path = atom_dir / f"{base_name}.json"
                     try:
                         scene = generate_scene_with_retries(
@@ -1593,6 +1716,8 @@ def main():
                             fixed_room_l=args.room_l,
                             difficulty=diff,
                             atom=True,
+                            texture_catalog=texture_catalog,
+                            config=config,
                         )
                         written = _write_dual_or_single(scene, str(base_path), usd_path_map)
                         generated += 1
