@@ -1,0 +1,253 @@
+{
+  "scene_name": "livingroom_small_seed1711319068",
+  "room": {
+    "size_m": [
+      3.549,
+      4.358,
+      2.6
+    ],
+    "wall_thickness_m": 0.1,
+    "floor_thickness_m": 0.05,
+    "origin_m": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "floor_material": null,
+    "wall_material": null
+  },
+  "nav": {
+    "origin_zone_xyxy_m": [
+      2.389,
+      0.16,
+      3.389,
+      1.16
+    ],
+    "dest_zone_xyxy_m": [
+      0.16,
+      3.198,
+      1.16,
+      4.198
+    ],
+    "corridor_width_m": 0.687,
+    "corridor_rects_xyxy_m": [
+      [
+        0.66,
+        0.3166,
+        2.889,
+        1.0034
+      ],
+      [
+        0.3166,
+        0.66,
+        1.0034,
+        3.698
+      ]
+    ],
+    "corridor_reserved_xyxy_m": [
+      [
+        0.61,
+        0.2666,
+        2.939,
+        1.0534
+      ],
+      [
+        0.2666,
+        0.61,
+        1.0534,
+        3.748
+      ]
+    ],
+    "reachability_mode": "side",
+    "grid_res_m": 0.1,
+    "difficulty_level_0_to_3": 3,
+    "corridor_obj_height_max_m": 0.2,
+    "corridor_obj_height_prefer_min_m": 0.05,
+    "front_pass_width_m": 1.0,
+    "side_pass_width_m": 0.5,
+    "humanoid_radius_main_m": 0.5,
+    "humanoid_radius_side_m": 0.25,
+    "forced_step_items_on_corridor": 1,
+    "step_over_on_corridor_count": 1,
+    "anneal_fail_window": 15,
+    "anneal_level": 40,
+    "counts_used": {
+      "chairs": 1,
+      "small_items": 0,
+      "cluster_items": 0,
+      "forced_step_items_max": 1,
+      "wall_big_max": 0
+    },
+    "step_over_candidate_classes": [
+      "blanket",
+      "book",
+      "cushion",
+      "magazine",
+      "remote",
+      "shoes",
+      "toy"
+    ]
+  },
+  "objects": [
+    {
+      "name": "sofa00",
+      "class": "sofa",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_original/sofa/sofa00/sofa00.usd",
+      "prim_path": "/World/Assets/sofa00",
+      "pose_m": {
+        "pos": [
+          1.1269,
+          2.9234,
+          0.0263
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          270.0
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.5381,
+      "is_step_over": false
+    },
+    {
+      "name": "floor_lamp_00_floor_lamp09",
+      "class": "floor_lamp",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_original/floor_lamp/floor_lamp09/floor_lamp09.usd",
+      "prim_path": "/World/Assets/floor_lamp_00_floor_lamp09",
+      "pose_m": {
+        "pos": [
+          1.7776,
+          1.3044,
+          0.048
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          141.389
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.6708,
+      "is_step_over": false
+    },
+    {
+      "name": "blanket_forcedcorr_00_blanket38",
+      "class": "blanket",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_original/blanket/blanket38/blanket38.usd",
+      "prim_path": "/World/Assets/blanket_forcedcorr_00_blanket38",
+      "pose_m": {
+        "pos": [
+          0.66,
+          2.3783,
+          0.0846
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          181.736
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.1692,
+      "is_step_over": true
+    },
+    {
+      "name": "remote_roomstep_00_remote15",
+      "class": "remote",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_original/remote/remote15/remote15.usd",
+      "prim_path": "/World/Assets/remote_roomstep_00_remote15",
+      "pose_m": {
+        "pos": [
+          2.4679,
+          1.3789,
+          0.0089
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          48.855
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0178,
+      "is_step_over": true
+    },
+    {
+      "name": "born_origin",
+      "class": "marker",
+      "usd_path": "",
+      "prim_path": "/World/Markers/origin",
+      "pose_m": {
+        "pos": [
+          2.889,
+          0.66,
+          0.0
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.15,
+      "is_step_over": true,
+      "marker_color_rgba": [
+        0.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "marker_radius_m": 0.03,
+      "marker_height_m": 0.15
+    },
+    {
+      "name": "destination",
+      "class": "marker",
+      "usd_path": "",
+      "prim_path": "/World/Markers/destination",
+      "pose_m": {
+        "pos": [
+          0.66,
+          3.698,
+          0.0
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.15,
+      "is_step_over": true,
+      "marker_color_rgba": [
+        1.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "marker_radius_m": 0.03,
+      "marker_height_m": 0.15
+    }
+  ],
+  "meta": {
+    "tier": "small",
+    "room_w_l_h": [
+      3.549,
+      4.358,
+      2.6
+    ],
+    "atom_mode": false,
+    "counts": {
+      "chairs": 1,
+      "scatter_items": 0,
+      "cluster_items": 0,
+      "wall_big_classes": []
+    },
+    "base_seed": 202602394697,
+    "attempt_index": 611,
+    "final_seed": 202603211604
+  }
+}

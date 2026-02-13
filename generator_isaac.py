@@ -397,8 +397,16 @@ def build_scene_from_json(json_path: str):
 # ---- Run ----
 # Put your json path here:
 # PROJ_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# Bedroom D3
+# PROJ_ROOT = "D:/Code/VR-for-Humanoid-Locomotion"
+# JSON_FILE = './bedroom/layout_json/bedroom_d3/bedroom_d3_000_original.json'
+# JSON_PATH = os.path.join(PROJ_ROOT, JSON_FILE)
+# build_scene_from_json(JSON_PATH)
+# print("Scene built from JSON:", JSON_PATH)
+
 PROJ_ROOT = "D:/Code/VR-for-Humanoid-Locomotion"
-JSON_FILE = './bedroom/layout_json/bedroom_d3/bedroom_d3_000_original.json'
+JSON_FILE = './livingroom/layout_json/livingroom_d3/livingroom_d3_000_original.json'
 JSON_PATH = os.path.join(PROJ_ROOT, JSON_FILE)
 build_scene_from_json(JSON_PATH)
 print("Scene built from JSON:", JSON_PATH)

@@ -1,0 +1,486 @@
+{
+  "scene_name": "livingroom_small_seed3101071888",
+  "room": {
+    "size_m": [
+      4.07,
+      4.617,
+      2.6
+    ],
+    "wall_thickness_m": 0.1,
+    "floor_thickness_m": 0.05,
+    "origin_m": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "floor_material": null,
+    "wall_material": null
+  },
+  "nav": {
+    "origin_zone_xyxy_m": [
+      2.91,
+      3.457,
+      3.91,
+      4.457
+    ],
+    "dest_zone_xyxy_m": [
+      0.16,
+      0.16,
+      1.16,
+      1.16
+    ],
+    "corridor_width_m": 1.165,
+    "corridor_rects_xyxy_m": [
+      [
+        0.66,
+        3.3747,
+        3.41,
+        4.5393
+      ],
+      [
+        0.0777,
+        0.66,
+        1.2423,
+        3.957
+      ]
+    ],
+    "corridor_reserved_xyxy_m": [
+      [
+        0.61,
+        3.3247,
+        3.46,
+        4.5893
+      ],
+      [
+        0.0277,
+        0.61,
+        1.2923,
+        4.007
+      ]
+    ],
+    "reachability_mode": "main",
+    "grid_res_m": 0.1,
+    "difficulty_level_0_to_3": 1,
+    "corridor_obj_height_max_m": 0.1,
+    "corridor_obj_height_prefer_min_m": 0.0,
+    "front_pass_width_m": 1.0,
+    "side_pass_width_m": 0.5,
+    "humanoid_radius_main_m": 0.5,
+    "humanoid_radius_side_m": 0.25,
+    "forced_step_items_on_corridor": 4,
+    "step_over_on_corridor_count": 7,
+    "anneal_fail_window": 15,
+    "anneal_level": 0,
+    "counts_used": {
+      "chairs": 1,
+      "small_items": 5,
+      "cluster_items": 3,
+      "forced_step_items_max": 4,
+      "wall_big_max": 3
+    },
+    "step_over_candidate_classes": [
+      "blanket",
+      "book",
+      "cushion",
+      "magazine",
+      "remote",
+      "shoes",
+      "toy"
+    ]
+  },
+  "objects": [
+    {
+      "name": "sofa45",
+      "class": "sofa",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/sofa/sofa45/sofa45.usd",
+      "prim_path": "/World/Assets/sofa45",
+      "pose_m": {
+        "pos": [
+          1.7362,
+          1.4379,
+          0.0295
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          90.0
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 1.0329,
+      "is_step_over": false
+    },
+    {
+      "name": "bookshelf_bookshelf26",
+      "class": "bookshelf",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/bookshelf/bookshelf26/bookshelf26.usd",
+      "prim_path": "/World/Assets/bookshelf_bookshelf26",
+      "pose_m": {
+        "pos": [
+          127860.3772,
+          1.0068,
+          127856.5156
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          270.0
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 1.8438,
+      "is_step_over": false
+    },
+    {
+      "name": "plant_pot_00_plant_pot20",
+      "class": "plant_pot",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/plant_pot/plant_pot20/plant_pot20.usd",
+      "prim_path": "/World/Assets/plant_pot_00_plant_pot20",
+      "pose_m": {
+        "pos": [
+          3.7138,
+          2.7744,
+          0.0909
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          37.08
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.2525,
+      "is_step_over": false
+    },
+    {
+      "name": "book_forcedcorr_00_book26",
+      "class": "book",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/book/book26/book26.usd",
+      "prim_path": "/World/Assets/book_forcedcorr_00_book26",
+      "pose_m": {
+        "pos": [
+          2.1371,
+          3.4428,
+          0.0238
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          278.911
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0475,
+      "is_step_over": true
+    },
+    {
+      "name": "remote_forcedcorr_01_remote37",
+      "class": "remote",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/remote/remote37/remote37.usd",
+      "prim_path": "/World/Assets/remote_forcedcorr_01_remote37",
+      "pose_m": {
+        "pos": [
+          0.7793,
+          2.4554,
+          0.0363
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          207.468
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0692,
+      "is_step_over": true
+    },
+    {
+      "name": "book_forcedcorr_02_book47",
+      "class": "book",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/book/book47/book47.usd",
+      "prim_path": "/World/Assets/book_forcedcorr_02_book47",
+      "pose_m": {
+        "pos": [
+          2.1426,
+          3.8169,
+          0.0
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          42.499
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0988,
+      "is_step_over": true
+    },
+    {
+      "name": "magazine_forcedcorr_03_magazine26",
+      "class": "magazine",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/magazine/magazine26/magazine26.usd",
+      "prim_path": "/World/Assets/magazine_forcedcorr_03_magazine26",
+      "pose_m": {
+        "pos": [
+          1.0915,
+          2.9737,
+          0.0
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          150.967
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0833,
+      "is_step_over": true
+    },
+    {
+      "name": "cushion_cluster_00_cushion14",
+      "class": "cushion",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/cushion/cushion14/cushion14.usd",
+      "prim_path": "/World/Assets/cushion_cluster_00_cushion14",
+      "pose_m": {
+        "pos": [
+          3.1154,
+          1.2066,
+          0.0368
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          327.739
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.2202,
+      "is_step_over": false
+    },
+    {
+      "name": "mug_cluster_01_mug44",
+      "class": "mug",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/mug/mug44/mug44.usd",
+      "prim_path": "/World/Assets/mug_cluster_01_mug44",
+      "pose_m": {
+        "pos": [
+          2.9791,
+          1.5403,
+          -0.0335
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          316.174
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0988,
+      "is_step_over": false
+    },
+    {
+      "name": "magazine_cluster_02_magazine05",
+      "class": "magazine",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/magazine/magazine05/magazine05.usd",
+      "prim_path": "/World/Assets/magazine_cluster_02_magazine05",
+      "pose_m": {
+        "pos": [
+          1.1723,
+          1.7207,
+          -0.0435
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          23.736
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0031,
+      "is_step_over": true
+    },
+    {
+      "name": "remote_00_remote08",
+      "class": "remote",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/remote/remote08/remote08.usd",
+      "prim_path": "/World/Assets/remote_00_remote08",
+      "pose_m": {
+        "pos": [
+          0.1486,
+          2.5966,
+          -0.0536
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          96.312
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0141,
+      "is_step_over": true
+    },
+    {
+      "name": "box_01_box34",
+      "class": "box",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/box/box34/box34.usd",
+      "prim_path": "/World/Assets/box_01_box34",
+      "pose_m": {
+        "pos": [
+          2.9731,
+          2.0264,
+          0.0427
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          20.378
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.2809,
+      "is_step_over": false
+    },
+    {
+      "name": "magazine_02_magazine08",
+      "class": "magazine",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/magazine/magazine08/magazine08.usd",
+      "prim_path": "/World/Assets/magazine_02_magazine08",
+      "pose_m": {
+        "pos": [
+          -3.0592,
+          -14.2646,
+          13.4628
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          72.076
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.252,
+      "is_step_over": false
+    },
+    {
+      "name": "remote_03_remote42",
+      "class": "remote",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/remote/remote42/remote42.usd",
+      "prim_path": "/World/Assets/remote_03_remote42",
+      "pose_m": {
+        "pos": [
+          1.4518,
+          3.9098,
+          0.0256
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          6.067
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0238,
+      "is_step_over": true
+    },
+    {
+      "name": "toy_04_toy37",
+      "class": "toy",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/livingroom/livingroom_assets_usd_simplified/toy/toy37/toy37.usd",
+      "prim_path": "/World/Assets/toy_04_toy37",
+      "pose_m": {
+        "pos": [
+          1.5687,
+          0.3653,
+          0.029
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          82.707
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.2939,
+      "is_step_over": false
+    },
+    {
+      "name": "born_origin",
+      "class": "marker",
+      "usd_path": "",
+      "prim_path": "/World/Markers/origin",
+      "pose_m": {
+        "pos": [
+          3.41,
+          3.957,
+          0.0
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.15,
+      "is_step_over": true,
+      "marker_color_rgba": [
+        0.0,
+        1.0,
+        0.0,
+        1.0
+      ],
+      "marker_radius_m": 0.03,
+      "marker_height_m": 0.15
+    },
+    {
+      "name": "destination",
+      "class": "marker",
+      "usd_path": "",
+      "prim_path": "/World/Markers/destination",
+      "pose_m": {
+        "pos": [
+          0.66,
+          0.66,
+          0.0
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.15,
+      "is_step_over": true,
+      "marker_color_rgba": [
+        1.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "marker_radius_m": 0.03,
+      "marker_height_m": 0.15
+    }
+  ],
+  "meta": {
+    "tier": "small",
+    "room_w_l_h": [
+      4.07,
+      4.617,
+      2.6
+    ],
+    "atom_mode": false,
+    "counts": {
+      "chairs": 1,
+      "scatter_items": 5,
+      "cluster_items": 3,
+      "wall_big_classes": [
+        "bookshelf"
+      ]
+    },
+    "base_seed": 202602199682,
+    "attempt_index": 1,
+    "final_seed": 202602201019
+  }
+}

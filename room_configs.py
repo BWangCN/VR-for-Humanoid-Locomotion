@@ -118,9 +118,9 @@ LIVINGROOM = RoomConfig(
     anchor_candidates=None,  # use all sofa assets
 
     wall_big_class_probs={
-        "small":  {"tv_stand": 0.85, "bookshelf": 0.55, "cabinet": 0.50, "desk": 0.40, "piano": 0.10},
-        "medium": {"tv_stand": 0.90, "bookshelf": 0.70, "cabinet": 0.65, "desk": 0.55, "piano": 0.15},
-        "large":  {"tv_stand": 0.95, "bookshelf": 0.80, "cabinet": 0.75, "desk": 0.70, "piano": 0.20},
+        "small":  {"bookshelf": 0.65, "cabinet": 0.55, "desk": 0.50, "piano": 0.10},
+        "medium": {"bookshelf": 0.80, "cabinet": 0.70, "desk": 0.65, "piano": 0.15},
+        "large":  {"bookshelf": 0.90, "cabinet": 0.80, "desk": 0.75, "piano": 0.20},
     },
     wall_big_max_by_tier={"small": 3, "medium": 4, "large": 5},
 
