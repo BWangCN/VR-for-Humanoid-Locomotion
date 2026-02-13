@@ -1,9 +1,9 @@
 {
-  "scene_name": "bedroom_medium_seed1368337427",
+  "scene_name": "bedroom_medium_seed1312001556",
   "room": {
     "size_m": [
-      4.762,
-      5.264,
+      4.264,
+      5.443,
       2.6
     ],
     "wall_thickness_m": 0.1,
@@ -18,44 +18,44 @@
   },
   "nav": {
     "origin_zone_xyxy_m": [
-      3.602,
+      3.104,
+      0.16,
       4.104,
-      4.602,
-      5.104
+      1.16
     ],
     "dest_zone_xyxy_m": [
       0.16,
-      0.16,
+      4.283,
       1.16,
-      1.16
+      5.283
     ],
-    "corridor_width_m": 0.706,
+    "corridor_width_m": 0.643,
     "corridor_rects_xyxy_m": [
       [
         0.66,
-        4.2508,
-        4.102,
-        4.9572
+        0.3385,
+        3.604,
+        0.9815
       ],
       [
-        0.3068,
+        0.3385,
         0.66,
-        1.0132,
-        4.604
+        0.9815,
+        4.783
       ]
     ],
     "corridor_reserved_xyxy_m": [
       [
         0.61,
-        4.2008,
-        4.152,
-        5.0072
+        0.2885,
+        3.654,
+        1.0315
       ],
       [
-        0.2568,
+        0.2885,
         0.61,
-        1.0632,
-        4.654
+        1.0315,
+        4.833
       ]
     ],
     "reachability_mode": "side",
@@ -72,9 +72,9 @@
     "anneal_fail_window": 15,
     "anneal_level": 3,
     "counts_used": {
-      "chairs": 1,
+      "chairs": 2,
       "small_items": 1,
-      "cluster_items": 4,
+      "cluster_items": 3,
       "forced_step_items_max": 4,
       "wall_big_max": 3
     },
@@ -90,15 +90,15 @@
   },
   "objects": [
     {
-      "name": "bed14",
+      "name": "bed05",
       "class": "bed",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/bed/bed14/bed14.usd",
-      "prim_path": "/World/Assets/bed14",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/bed/bed05/bed05.usd",
+      "prim_path": "/World/Assets/bed05",
       "pose_m": {
         "pos": [
-          9.5316,
-          2.3893,
-          162.6515
+          3.1211,
+          3.7843,
+          0.2707
         ],
         "rot_deg": [
           0.0,
@@ -107,40 +107,19 @@
         ]
       },
       "rigid_body": false,
-      "aabb_height_m": 1.6493,
+      "aabb_height_m": 0.7448,
       "is_step_over": false
     },
     {
-      "name": "desk_desk44",
-      "class": "desk",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/desk/desk44/desk44.usd",
-      "prim_path": "/World/Assets/desk_desk44",
+      "name": "suitcase_suitcase23",
+      "class": "suitcase",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/suitcase/suitcase23/suitcase23.usd",
+      "prim_path": "/World/Assets/suitcase_suitcase23",
       "pose_m": {
         "pos": [
-          3.4637,
-          0.9252,
-          0.0
-        ],
-        "rot_deg": [
-          0.0,
-          0.0,
-          180.0
-        ]
-      },
-      "rigid_body": false,
-      "aabb_height_m": 0.6741,
-      "is_step_over": false
-    },
-    {
-      "name": "wardrobe_wardrobe21",
-      "class": "wardrobe",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/wardrobe/wardrobe21/wardrobe21.usd",
-      "prim_path": "/World/Assets/wardrobe_wardrobe21",
-      "pose_m": {
-        "pos": [
-          1.9255,
-          0.4923,
-          0.0
+          1.8664,
+          5.0945,
+          -0.0023
         ],
         "rot_deg": [
           0.0,
@@ -149,19 +128,19 @@
         ]
       },
       "rigid_body": false,
-      "aabb_height_m": 2.1614,
+      "aabb_height_m": 0.2098,
       "is_step_over": false
     },
     {
-      "name": "suitcase_suitcase20",
-      "class": "suitcase",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/suitcase/suitcase20/suitcase20.usd",
-      "prim_path": "/World/Assets/suitcase_suitcase20",
+      "name": "wardrobe_wardrobe38",
+      "class": "wardrobe",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/wardrobe/wardrobe38/wardrobe38.usd",
+      "prim_path": "/World/Assets/wardrobe_wardrobe38",
       "pose_m": {
         "pos": [
-          4.5413,
-          3.6882,
-          -0.0869
+          4.0231,
+          1.759,
+          1.9
         ],
         "rot_deg": [
           0.0,
@@ -170,175 +149,217 @@
         ]
       },
       "rigid_body": false,
-      "aabb_height_m": 0.4615,
+      "aabb_height_m": 2.0216,
       "is_step_over": false
     },
     {
-      "name": "chair_00_chair47",
+      "name": "chair_00_chair32",
       "class": "chair",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/chair/chair47/chair47.usd",
-      "prim_path": "/World/Assets/chair_00_chair47",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/chair/chair32/chair32.usd",
+      "prim_path": "/World/Assets/chair_00_chair32",
       "pose_m": {
         "pos": [
-          1.7677,
-          3.4993,
-          0.6016
+          2.4899,
+          1.6614,
+          0.508
         ],
         "rot_deg": [
           0.0,
           0.0,
-          111.464
+          110.288
         ]
       },
       "rigid_body": false,
-      "aabb_height_m": 0.9476,
+      "aabb_height_m": 0.8985,
       "is_step_over": false
     },
     {
-      "name": "laptop_roomstep_00_laptop37",
-      "class": "laptop",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/laptop/laptop37/laptop37.usd",
-      "prim_path": "/World/Assets/laptop_roomstep_00_laptop37",
+      "name": "chair_01_chair03",
+      "class": "chair",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/chair/chair03/chair03.usd",
+      "prim_path": "/World/Assets/chair_01_chair03",
       "pose_m": {
         "pos": [
-          3.3351,
-          3.7143,
-          -0.0005
+          1.5608,
+          1.5294,
+          0.5991
         ],
         "rot_deg": [
           0.0,
           0.0,
-          297.601
+          277.893
         ]
       },
       "rigid_body": false,
-      "aabb_height_m": 0.0493,
-      "is_step_over": true
-    },
-    {
-      "name": "laptop_roomstep_01_laptop22",
-      "class": "laptop",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/laptop/laptop22/laptop22.usd",
-      "prim_path": "/World/Assets/laptop_roomstep_01_laptop22",
-      "pose_m": {
-        "pos": [
-          -15.1285,
-          -8.0999,
-          -3.8023
-        ],
-        "rot_deg": [
-          0.0,
-          0.0,
-          292.426
-        ]
-      },
-      "rigid_body": false,
-      "aabb_height_m": 0.0454,
-      "is_step_over": true
-    },
-    {
-      "name": "laptop_cluster_00_laptop39",
-      "class": "laptop",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/laptop/laptop39/laptop39.usd",
-      "prim_path": "/World/Assets/laptop_cluster_00_laptop39",
-      "pose_m": {
-        "pos": [
-          1.787,
-          2.5431,
-          0.0011
-        ],
-        "rot_deg": [
-          0.0,
-          0.0,
-          105.199
-        ]
-      },
-      "rigid_body": false,
-      "aabb_height_m": 0.0457,
+      "aabb_height_m": 1.0402,
       "is_step_over": false
     },
     {
-      "name": "bottle_cluster_01_bottle05",
-      "class": "bottle",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/bottle/bottle05/bottle05.usd",
-      "prim_path": "/World/Assets/bottle_cluster_01_bottle05",
-      "pose_m": {
-        "pos": [
-          1.4847,
-          1.6536,
-          0.1102
-        ],
-        "rot_deg": [
-          0.0,
-          0.0,
-          339.329
-        ]
-      },
-      "rigid_body": false,
-      "aabb_height_m": 0.0742,
-      "is_step_over": false
-    },
-    {
-      "name": "bottle_cluster_02_bottle00",
-      "class": "bottle",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/bottle/bottle00/bottle00.usd",
-      "prim_path": "/World/Assets/bottle_cluster_02_bottle00",
-      "pose_m": {
-        "pos": [
-          2.9141,
-          3.8189,
-          -0.0012
-        ],
-        "rot_deg": [
-          0.0,
-          0.0,
-          32.187
-        ]
-      },
-      "rigid_body": false,
-      "aabb_height_m": 0.3029,
-      "is_step_over": false
-    },
-    {
-      "name": "bottle_cluster_03_bottle33",
-      "class": "bottle",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/bottle/bottle33/bottle33.usd",
-      "prim_path": "/World/Assets/bottle_cluster_03_bottle33",
-      "pose_m": {
-        "pos": [
-          1.7638,
-          1.7103,
-          -0.0043
-        ],
-        "rot_deg": [
-          0.0,
-          0.0,
-          257.544
-        ]
-      },
-      "rigid_body": false,
-      "aabb_height_m": 0.2704,
-      "is_step_over": false
-    },
-    {
-      "name": "shoes_00_shoes49",
+      "name": "shoes_roomstep_00_shoes01",
       "class": "shoes",
-      "usd_path": "C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv/bedroom/bedroom_assets_usd_original/shoes/shoes49/shoes49.usd",
-      "prim_path": "/World/Assets/shoes_00_shoes49",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/shoes/shoes01/shoes01.usd",
+      "prim_path": "/World/Assets/shoes_roomstep_00_shoes01",
       "pose_m": {
         "pos": [
-          0.3438,
-          5.0256,
-          0.0047
+          3.1516,
+          1.8392,
+          0.0542
         ],
         "rot_deg": [
           0.0,
           0.0,
-          124.286
+          75.623
         ]
       },
       "rigid_body": false,
-      "aabb_height_m": 0.134,
+      "aabb_height_m": 0.0888,
+      "is_step_over": true
+    },
+    {
+      "name": "shoes_roomstep_01_shoes05",
+      "class": "shoes",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/shoes/shoes05/shoes05.usd",
+      "prim_path": "/World/Assets/shoes_roomstep_01_shoes05",
+      "pose_m": {
+        "pos": [
+          1.6705,
+          2.3581,
+          0.0013
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          118.033
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.095,
+      "is_step_over": true
+    },
+    {
+      "name": "book_roomstep_02_book19",
+      "class": "book",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/book/book19/book19.usd",
+      "prim_path": "/World/Assets/book_roomstep_02_book19",
+      "pose_m": {
+        "pos": [
+          1.3131,
+          2.924,
+          0.0394
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          244.97
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0285,
+      "is_step_over": true
+    },
+    {
+      "name": "laptop_roomstep_03_laptop12",
+      "class": "laptop",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/laptop/laptop12/laptop12.usd",
+      "prim_path": "/World/Assets/laptop_roomstep_03_laptop12",
+      "pose_m": {
+        "pos": [
+          2.0561,
+          4.3426,
+          0.0007
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          124.063
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0225,
+      "is_step_over": true
+    },
+    {
+      "name": "blanket_cluster_00_blanket15",
+      "class": "blanket",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/blanket/blanket15/blanket15.usd",
+      "prim_path": "/World/Assets/blanket_cluster_00_blanket15",
+      "pose_m": {
+        "pos": [
+          1.9629,
+          1.1816,
+          -1.2803
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          183.473
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.2135,
+      "is_step_over": false
+    },
+    {
+      "name": "shoes_cluster_01_shoes48",
+      "class": "shoes",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/shoes/shoes48/shoes48.usd",
+      "prim_path": "/World/Assets/shoes_cluster_01_shoes48",
+      "pose_m": {
+        "pos": [
+          5.1747,
+          -6.0259,
+          4.9671
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          202.252
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.1246,
+      "is_step_over": false
+    },
+    {
+      "name": "laptop_cluster_02_laptop24",
+      "class": "laptop",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/laptop/laptop24/laptop24.usd",
+      "prim_path": "/World/Assets/laptop_cluster_02_laptop24",
+      "pose_m": {
+        "pos": [
+          1.6752,
+          2.8287,
+          0.001
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          351.448
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0536,
+      "is_step_over": false
+    },
+    {
+      "name": "book_00_book16",
+      "class": "book",
+      "usd_path": "D:/Code/VR-for-Humanoid-Locomotion/bedroom/bedroom_assets_usd_original/book/book16/book16.usd",
+      "prim_path": "/World/Assets/book_00_book16",
+      "pose_m": {
+        "pos": [
+          1.2542,
+          2.2493,
+          0.0
+        ],
+        "rot_deg": [
+          0.0,
+          0.0,
+          185.783
+        ]
+      },
+      "rigid_body": false,
+      "aabb_height_m": 0.0332,
       "is_step_over": false
     },
     {
@@ -348,8 +369,8 @@
       "prim_path": "/World/Markers/origin",
       "pose_m": {
         "pos": [
-          4.102,
-          4.604,
+          3.604,
+          0.66,
           0.0
         ],
         "rot_deg": [
@@ -378,7 +399,7 @@
       "pose_m": {
         "pos": [
           0.66,
-          0.66,
+          4.783,
           0.0
         ],
         "rot_deg": [
@@ -403,23 +424,22 @@
   "meta": {
     "tier": "medium",
     "room_w_l_h": [
-      4.762,
-      5.264,
+      4.264,
+      5.443,
       2.6
     ],
     "atom_mode": false,
     "counts": {
-      "chairs": 1,
+      "chairs": 2,
       "scatter_items": 1,
-      "cluster_items": 4,
+      "cluster_items": 3,
       "wall_big_classes": [
-        "desk",
-        "wardrobe",
-        "suitcase"
+        "suitcase",
+        "wardrobe"
       ]
     },
     "base_seed": 202602315634,
-    "attempt_index": 53,
-    "final_seed": 202602386495
+    "attempt_index": 48,
+    "final_seed": 202602379810
   }
 }

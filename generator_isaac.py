@@ -386,6 +386,8 @@ def build_scene_from_json(json_path: str):
             # Isaac likes forward slashes; Windows path in USD ref usually works with forward slashes.
             usd_path_fixed = usd_path.replace("\\", "/")
 
+            usd_path_fixed = usd_path_fixed.replace('C:/Users/Wayne/Desktop/GMU/PhD/Humanoid/SimEnv', 'D:/Code/VR-for-Humanoid-Locomotion')
+
             add_reference(prim_path, usd_path_fixed)
             set_xform_xyz_rpy_deg(prim_path, pos, rot)
 
@@ -394,6 +396,9 @@ def build_scene_from_json(json_path: str):
 
 # ---- Run ----
 # Put your json path here:
-JSON_PATH = r"C:\Users\Wayne\Desktop\GMU\PhD\Humanoid\SimEnv\bedroom\layout_json\bedroom_d3\bedroom_d3_000_original.json"
+# PROJ_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJ_ROOT = "D:/Code/VR-for-Humanoid-Locomotion"
+JSON_FILE = './bedroom/layout_json/bedroom_d3/bedroom_d3_000_original.json'
+JSON_PATH = os.path.join(PROJ_ROOT, JSON_FILE)
 build_scene_from_json(JSON_PATH)
 print("Scene built from JSON:", JSON_PATH)
