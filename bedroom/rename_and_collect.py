@@ -4,7 +4,7 @@ import pandas as pd
 from collections import defaultdict
 
 # -------- Paths --------
-BASE_DIR = r"C:\Users\Wayne\Desktop\GMU\PhD\Humanoid\SimEnv\bedroom"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CANDIDATES_CSV = os.path.join(BASE_DIR, "objaverse_bedroom", "bedroom_candidates.csv")
 PATHS_CSV = os.path.join(BASE_DIR, "objaverse_bedroom", "bedroom_downloaded_paths.csv")
 

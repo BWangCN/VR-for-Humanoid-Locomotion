@@ -4,6 +4,8 @@ import pandas as pd
 import objaverse
 
 # ——— Config ———
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 OUT_DIR = "./objaverse_bedroom"
 DOWNLOAD_DIR = os.path.join(OUT_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
