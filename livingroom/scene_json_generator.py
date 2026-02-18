@@ -99,6 +99,15 @@ CORRIDOR_MARGIN = 0.05  # inflate corridor "reserved" rect a bit (for big object
 
 BIG_YAW_CHOICES = [0.0, 90.0, 180.0, 270.0]
 
+# Yaw (degrees) that makes the furniture front (-Y in local coords) face into the room.
+WALL_FACING_YAW = {
+    "LEFT":  90.0,   # front faces +X
+    "RIGHT": 270.0,  # front faces -X
+    "BACK":  180.0,  # front faces +Y
+    "FRONT": 0.0,    # front faces -Y
+}
+FACE_ROOM_YAW_JITTER = 5.0  # degrees of random jitter for visual variety
+
 # Wall-hugging big items: each selected CLASS appears at most ONE instance
 WALL_BIG_CLASS_PROBS = {
     "small":  {"wardrobe": 0.60, "suitcase": 0.65, "desk": 0.55, "cabinet": 0.50},
@@ -530,11 +539,15 @@ def place_against_wall(
     rng: random.Random,
     yaw_choices: List[float],
     max_tries: int = 1600,
+    face_room: bool = False,
 ) -> Tuple[Tuple[float, float], float, Tuple[float, float, float, float], str]:
     walls = ["LEFT", "RIGHT", "BACK", "FRONT"]
     for _ in range(max_tries):
         wall = rng.choice(walls)
-        yaw = rng.choice(yaw_choices)
+        if face_room:
+            yaw = WALL_FACING_YAW[wall] + rng.uniform(-FACE_ROOM_YAW_JITTER, FACE_ROOM_YAW_JITTER)
+        else:
+            yaw = rng.choice(yaw_choices)
         local_rect = aabb2d_after_yaw(aabb, yaw)
         lx0, ly0, lx1, ly1 = local_rect
 
@@ -1062,7 +1075,10 @@ def build_one_scene(
     else:
         anchor_aabb = pick_random_from_class(assets, anchor_cls, rng)
     anchor_forbidden = hard_forbidden + corridor_reserved
-    (tx, ty), yaw, anchor_rect, _ = place_against_wall(room_w, room_l, anchor_aabb, anchor_forbidden, rng, yaw_choices=BIG_YAW_CHOICES)
+    _anchor_face = anchor_cls in (config.orientation_sensitive_classes if config else {"bed"})
+    (tx, ty), yaw, anchor_rect, _ = place_against_wall(
+        room_w, room_l, anchor_aabb, anchor_forbidden, rng,
+        yaw_choices=BIG_YAW_CHOICES, face_room=_anchor_face)
     anchor_z = place_on_floor_z(anchor_aabb, spawn_extra=0.0)
     anchor_name = anchor_aabb.asset
     placed.append(Placed(
@@ -1085,7 +1101,10 @@ def build_one_scene(
     for cls in wall_big_classes:
         big_aabb = pick_random_from_class(assets, cls, rng)
         forb = hard_forbidden + corridor_reserved
-        (tx, ty), yaw, rect, _ = place_against_wall(room_w, room_l, big_aabb, forb, rng, yaw_choices=BIG_YAW_CHOICES)
+        _big_face = cls in (config.orientation_sensitive_classes if config else {"bed", "desk", "wardrobe", "cabinet"})
+        (tx, ty), yaw, rect, _ = place_against_wall(
+            room_w, room_l, big_aabb, forb, rng,
+            yaw_choices=BIG_YAW_CHOICES, face_room=_big_face)
         z = place_on_floor_z(big_aabb, spawn_extra=0.0)
         name = f"{cls}_{big_aabb.asset}"
         placed.append(Placed(

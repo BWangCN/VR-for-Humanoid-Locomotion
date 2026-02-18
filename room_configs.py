@@ -48,6 +48,10 @@ class RoomConfig:
     # Corridor width ranges per tier
     corridor_width_range_by_tier: Dict[str, Tuple[float, float]] = field(default_factory=dict)
 
+    # Classes whose front side should face the room when placed against a wall.
+    # Objects not in this set get random cardinal yaw (current behavior).
+    orientation_sensitive_classes: Set[str] = field(default_factory=set)
+
 
 # ---------------------------------------------------------------------------
 #  BEDROOM
@@ -92,6 +96,8 @@ BEDROOM = RoomConfig(
         "medium": (0.62, 1.30),
         "large":  (0.62, 1.40),
     },
+
+    orientation_sensitive_classes={"bed", "desk", "wardrobe", "cabinet"},
 )
 
 
@@ -138,6 +144,8 @@ LIVINGROOM = RoomConfig(
         "medium": (0.62, 1.30),
         "large":  (0.62, 1.40),
     },
+
+    orientation_sensitive_classes={"sofa", "desk", "bookshelf", "cabinet", "piano"},
 )
 
 
