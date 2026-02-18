@@ -150,11 +150,60 @@ LIVINGROOM = RoomConfig(
 
 
 # ---------------------------------------------------------------------------
+#  KITCHEN
+# ---------------------------------------------------------------------------
+KITCHEN = RoomConfig(
+    name="kitchen",
+
+    room_tiers={
+        "small":  {"w": (2.5, 3.5), "l": (3.0, 4.0)},
+        "medium": {"w": (3.5, 4.5), "l": (4.0, 5.5)},
+        "large":  {"w": (4.5, 6.0), "l": (5.5, 7.0)},
+    },
+    room_tier_probs=[0.35, 0.45, 0.20],
+
+    tier_counts={
+        "small":  {"chairs": (1, 2), "small_items": (5, 10),  "cluster_items": (3, 6)},
+        "medium": {"chairs": (1, 3), "small_items": (8, 16),  "cluster_items": (5, 10)},
+        "large":  {"chairs": (2, 4), "small_items": (12, 20), "cluster_items": (6, 12)},
+    },
+
+    anchor_class="dining_table",
+    anchor_candidates=None,  # use all dining_table assets
+
+    wall_big_class_probs={
+        "small":  {"fridge": 0.90, "cabinet": 0.70, "oven": 0.60, "dishwasher": 0.30},
+        "medium": {"fridge": 0.95, "cabinet": 0.85, "oven": 0.75, "dishwasher": 0.45},
+        "large":  {"fridge": 0.95, "cabinet": 0.90, "oven": 0.85, "dishwasher": 0.55},
+    },
+    wall_big_max_by_tier={"small": 3, "medium": 4, "large": 5},
+
+    free_medium_classes=["chair", "stool", "trash_can"],
+
+    step_over_candidate_classes={"towel", "shoes", "bottle", "box", "pot", "pan", "bag"},
+
+    cluster_classes=["pot", "pan", "bottle", "mug", "plate", "bowl", "cutting_board"],
+    scatter_classes=["shoes", "bottle", "box", "bag", "towel", "mug", "bowl"],
+
+    pair_classes={"shoes"},
+
+    corridor_width_range_by_tier={
+        "small":  (0.62, 1.20),
+        "medium": (0.62, 1.30),
+        "large":  (0.62, 1.40),
+    },
+
+    orientation_sensitive_classes={"dining_table", "fridge", "cabinet", "oven", "dishwasher"},
+)
+
+
+# ---------------------------------------------------------------------------
 #  Registry
 # ---------------------------------------------------------------------------
 CONFIGS: Dict[str, RoomConfig] = {
     "bedroom": BEDROOM,
     "livingroom": LIVINGROOM,
+    "kitchen": KITCHEN,
 }
 
 
